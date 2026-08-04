@@ -3,7 +3,7 @@ import os
 import zipfile
 import pandas as pd
 from pypdf import PdfReader, PdfWriter
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import letter, A4
 from reportlab.pdfgen import canvas
 import streamlit as st
 
@@ -15,6 +15,8 @@ st.set_page_config(
 # Initialize navigation state
 if "current_page" not in st.session_state:
     st.session_state.current_page = "batch_consolidator"
+if "batches_subtab" not in st.session_state:
+    st.session_state.batches_subtab = "batch_headers"
 
 
 # Helper function for consolidator cover pages
@@ -98,6 +100,77 @@ def create_batch_header_file(
     can.save()
     packet.seek(0)
     return packet
+
+
+# Helper function for Print Labels Imposition
+def create_labels_pdf(
+    rows,
+    cols,
+    label_w_pt,
+    label_h_pt,
+    gutter_x_pt,
+    gutter_y_pt,
+    margin_x_pt,
+    margin_y_pt,
+    lines_config,
+    total_labels,
+    include_numbering,
+):
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=A4)
+    a4_w, a4_h = A4
+
+    labels_per_sheet = rows * cols
+    current_label = 1
+
+    while current_label <= total_labels:
+        for r in range(rows):
+            for c in range(cols):
+                if current_label > total_labels:
+                    break
+
+                # Calculate coordinates for top-left of the current label box
+                x_left = margin_x_pt + c * (label_w_pt + gutter_x_pt)
+                y_top = a4_h - margin_y_pt - r * (label_h_pt + gutter_y_pt)
+                y_bottom = y_top - label_h_pt
+                center_x = x_left + (label_w_pt / 2.0)
+
+                # Prepare lines list including sequential numbering if enabled
+                active_lines = list(lines_config)
+                if include_numbering:
+                    active_lines.append(
+                        {
+                            "text": f"{current_label} of {total_labels}",
+                            "font_size": 10,
+                            "bold": True,
+                        }
+                    )
+
+                # Vertical positioning inside label bounding box
+                total_content_lines = len(active_lines)
+                if total_content_lines > 0:
+                    line_height = label_h_pt / (total_content_lines + 1)
+                    current_y = y_top - line_height
+
+                    for line in active_lines:
+                        font_name = (
+                            "Helvetica-Bold" if line["bold"] else "Helvetica"
+                        )
+                        can.setFont(font_name, line["font_size"])
+                        can.drawCentredString(
+                            center_x, current_y, str(line["text"])
+                        )
+                        current_y -= line_height
+
+                current_label += 1
+
+        can.showPage()
+
+    can.save()
+    packet.seek(0)
+    return packet
+
+
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
 # ---------------------------------------------------------
@@ -119,8 +192,8 @@ with col3:
         st.session_state.current_page = "batch_consolidator"
 
 with col4:
-    if st.button("🏷️ Batch Headers", use_container_width=True):
-        st.session_state.current_page = "batch_headers"
+    if st.button("🏷️ Batches & Labels", use_container_width=True):
+        st.session_state.current_page = "batches_and_labels"
 
 with col5:
     if st.button("⚙️ General", use_container_width=True):
@@ -438,7 +511,9 @@ elif st.session_state.current_page == "batch_consolidator":
                         buf.seek(0)
 
                         batch_filename = f"{excel_basename}_Consolidated_Batch_{batch_idx}_of_{total_batches}.pdf"
-                        generated_files.append((batch_filename, buf.getvalue()))
+                        generated_files.append(
+                            (batch_filename, buf.getvalue())
+                        )
 
                     st.success(
                         f"Processing complete! Generated {total_batches} batch file(s)."
@@ -471,54 +546,274 @@ elif st.session_state.current_page == "batch_consolidator":
                         )
 
 # ---------------------------------------------------------
-# PAGE 4: BATCH HEADERS
+# PAGE 4: BATCHES & LABELS
 # ---------------------------------------------------------
-elif st.session_state.current_page == "batch_headers":
-    st.subheader("🏷️ Batch Headers Generator")
-    st.write(
-        "Generate print header sheets with large typography for print jobs and batch tracking."
-    )
+elif st.session_state.current_page == "batches_and_labels":
+    st.subheader("🏷️ Batches & Labels Dashboard")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        job_no = st.text_input("Job No.:", value="054520")
-    with col2:
-        description = st.text_input("Description:", value="Fragrance Wk5-6")
-
-    total_batches = st.number_input(
-        "Total Batches (Number of Pages):",
-        min_value=1,
-        max_value=1000,
-        value=20,
-        step=1,
-    )
-
-    auto_number = st.checkbox(
-        "Include Total Count (e.g. '1 OF 20')?",
-        value=True,
-        help="If checked, numbers each page as '1 OF 20', '2 OF 20'. If unchecked, prints '1 OF ______' for manual entry.",
-    )
+    sub_col1, sub_col2 = st.columns(2)
+    with sub_col1:
+        if st.button("🏷️ Batch Headers", use_container_width=True):
+            st.session_state.batches_subtab = "batch_headers"
+    with sub_col2:
+        if st.button("🖨️ Print Labels", use_container_width=True):
+            st.session_state.batches_subtab = "print_labels"
 
     st.divider()
 
-    if st.button("Generate Batch Headers PDF", type="primary"):
-        with st.spinner("Generating batch header sheets..."):
-            pdf_bytes = create_batch_header_file(
-                job_no=job_no,
-                description=description,
-                total_batches=int(total_batches),
-                auto_number=auto_number,
+    # --- SUBTAB 1: BATCH HEADERS ---
+    if st.session_state.batches_subtab == "batch_headers":
+        st.markdown("### 🏷️ Batch Headers Generator")
+        st.write(
+            "Generate print header sheets with large typography for print jobs and batch tracking."
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            job_no = st.text_input("Job No.:", value="054520")
+        with col2:
+            description = st.text_input(
+                "Description:", value="Fragrance Wk5-6"
             )
 
-            out_filename = f"{job_no}_Batch_Headers.pdf"
+        total_batches = st.number_input(
+            "Total Batches (Number of Pages):",
+            min_value=1,
+            max_value=1000,
+            value=20,
+            step=1,
+        )
 
-            st.success("Batch headers generated successfully!")
-            st.download_button(
-                label=f"⬇️ Download {out_filename}",
-                data=pdf_bytes,
-                file_name=out_filename,
-                mime="application/pdf",
+        auto_number = st.checkbox(
+            "Include Total Count (e.g. '1 OF 20')?",
+            value=True,
+            help="If checked, numbers each page as '1 OF 20', '2 OF 20'. If unchecked, prints '1 OF ______' for manual entry.",
+        )
+
+        st.divider()
+
+        if st.button("Generate Batch Headers PDF", type="primary"):
+            with st.spinner("Generating batch header sheets..."):
+                pdf_bytes = create_batch_header_file(
+                    job_no=job_no,
+                    description=description,
+                    total_batches=int(total_batches),
+                    auto_number=auto_number,
+                )
+
+                out_filename = f"{job_no}_Batch_Headers.pdf"
+
+                st.success("Batch headers generated successfully!")
+                st.download_button(
+                    label=f"⬇️ Download {out_filename}",
+                    data=pdf_bytes,
+                    file_name=out_filename,
+                    mime="application/pdf",
+                )
+
+    # --- SUBTAB 2: PRINT LABELS ---
+    elif st.session_state.batches_subtab == "print_labels":
+        st.markdown("### 🖨️ Print Labels Generator")
+        st.write(
+            "Design customized label content and impose them automatically on A4 pages."
+        )
+
+        st.markdown("#### 1. Page Layout & Label Dimensions (mm)")
+        col_grid1, col_grid2 = st.columns(2)
+        with col_grid1:
+            rows = st.number_input(
+                "Rows per A4 Page:", min_value=1, max_value=20, value=7, step=1
             )
+            cols = st.number_input(
+                "Columns per A4 Page:",
+                min_value=1,
+                max_value=10,
+                value=2,
+                step=1,
+            )
+            label_w_mm = st.number_input(
+                "Label Width (mm):",
+                min_value=10.0,
+                max_value=210.0,
+                value=99.1,
+                step=0.5,
+            )
+            label_h_mm = st.number_input(
+                "Label Height (mm):",
+                min_value=10.0,
+                max_value=297.0,
+                value=38.1,
+                step=0.5,
+            )
+
+        with col_grid2:
+            gutter_x_mm = st.number_input(
+                "Horizontal Gutter (mm):",
+                min_value=0.0,
+                max_value=50.0,
+                value=2.5,
+                step=0.5,
+            )
+            gutter_y_mm = st.number_input(
+                "Vertical Gutter (mm):",
+                min_value=0.0,
+                max_value=50.0,
+                value=0.0,
+                step=0.5,
+            )
+            margin_x_mm = st.number_input(
+                "Page Side Margin (mm):",
+                min_value=0.0,
+                max_value=50.0,
+                value=4.5,
+                step=0.5,
+            )
+            margin_y_mm = st.number_input(
+                "Page Top Margin (mm):",
+                min_value=0.0,
+                max_value=50.0,
+                value=15.0,
+                step=0.5,
+            )
+
+        st.divider()
+
+        st.markdown("#### 2. Label Text Configuration")
+        num_lines = st.number_input(
+            "Number of Text Lines per Label:",
+            min_value=1,
+            max_value=10,
+            value=3,
+            step=1,
+        )
+
+        lines_config = []
+        for line_idx in range(int(num_lines)):
+            st.markdown(f"**Line {line_idx + 1}:**")
+            col_txt, col_fs, col_bld = st.columns([3, 1, 1])
+
+            with col_txt:
+                line_text = st.text_input(
+                    f"Text", value=f"Line {line_idx + 1} Content", key=f"lbl_txt_{line_idx}"
+                )
+            with col_fs:
+                font_size = st.number_input(
+                    f"Font Size",
+                    min_value=6,
+                    max_value=72,
+                    value=12,
+                    step=1,
+                    key=f"lbl_fs_{line_idx}",
+                )
+            with col_bld:
+                is_bold = st.checkbox(
+                    f"Bold", value=False, key=f"lbl_bld_{line_idx}"
+                )
+
+            lines_config.append(
+                {"text": line_text, "font_size": int(font_size), "bold": is_bold}
+            )
+
+        st.divider()
+
+        st.markdown("#### 3. Batch Quantity & Numbering")
+        col_qty1, col_qty2 = st.columns(2)
+        with col_qty1:
+            total_labels = st.number_input(
+                "Total Quantity of Labels to Print:",
+                min_value=1,
+                max_value=10000,
+                value=14,
+                step=1,
+            )
+        with col_qty2:
+            include_numbering = st.checkbox(
+                "Append '1 of N' Numbering Line?",
+                value=True,
+                help="Adds a bottom line displaying '1 of 14', '2 of 14', etc., on each label.",
+            )
+
+        st.divider()
+
+        if st.button("Generate Imposed Labels PDF", type="primary"):
+            with st.spinner("Generating and imposing labels on A4..."):
+                # Convert mm to ReportLab points (1 mm = 2.83464567 points)
+                mm_to_pt = 2.83464567
+                label_w_pt = label_w_mm * mm_to_pt
+                label_h_pt = label_h_mm * mm_to_pt
+                gutter_x_pt = gutter_x_mm * mm_to_pt
+                gutter_y_pt = gutter_y_mm * mm_to_pt
+                margin_x_pt = margin_x_mm * mm_to_pt
+                margin_y_pt = margin_y_mm * mm_to_pt
+
+                labels_pdf_io = create_labels_pdf(
+                    rows=int(rows),
+                    cols=int(cols),
+                    label_w_pt=label_w_pt,
+                    label_h_pt=label_h_pt,
+                    gutter_x_pt=gutter_x_pt,
+                    gutter_y_pt=gutter_y_pt,
+                    margin_x_pt=margin_x_pt,
+                    margin_y_pt=margin_y_pt,
+                    lines_config=lines_config,
+                    total_labels=int(total_labels),
+                    include_numbering=include_numbering,
+                )
+
+                out_filename = f"Imposed_Labels_{total_labels}_Items.pdf"
+
+                st.success("Labels PDF generated successfully!")
+                st.download_button(
+                    label=f"⬇️ Download {out_filename}",
+                    data=labels_pdf_io,
+                    file_name=out_filename,
+                    mime="application/pdf",
+                )
 
 # ---------------------------------------------------------
-# PAGE 5: GENERAL
+# PAGE 5: GENERAL / UTILITIES
+# ---------------------------------------------------------
+elif st.session_state.current_page == "general":
+    st.subheader("⚙️ General Settings & Diagnostics")
+    st.write(
+        "Manage application state, view active session data, and inspect quick PDF properties."
+    )
+
+    st.markdown("### 📄 Quick PDF Inspector")
+    inspect_file = st.file_uploader(
+        "Upload a PDF to inspect metadata and dimensions:", type=["pdf"]
+    )
+
+    if inspect_file:
+        try:
+            reader = PdfReader(inspect_file)
+            total_pages = len(reader.pages)
+            st.write(f"**Total Pages:** {total_pages}")
+
+            if total_pages > 0:
+                first_page = reader.pages[0]
+                width = float(first_page.mediabox.width)
+                height = float(first_page.mediabox.height)
+
+                col_w, col_h = st.columns(2)
+                col_w.metric("Width (pt)", f"{width:.2f}")
+                col_h.metric("Height (pt)", f"{height:.2f}")
+
+                if reader.metadata:
+                    st.markdown("**Document Metadata:**")
+                    metadata_clean = {
+                        k: str(v)
+                        for k, v in reader.metadata.items()
+                        if v is not None
+                    }
+                    st.json(metadata_clean)
+        except Exception as e:
+            st.error(f"Error reading PDF file: {e}")
+
+    st.divider()
+
+    st.markdown("### 🔄 Session Management")
+    if st.button("Reset Session State"):
+        st.session_state.clear()
+        st.session_state.current_page = "batch_consolidator"
+        st.rerun()
