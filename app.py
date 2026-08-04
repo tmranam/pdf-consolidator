@@ -8,37 +8,41 @@ import streamlit as st
 
 
 def create_header_pdf(
-    store_name, address, postcode, total_pages, page_width=612, page_height=792
+    metadata_dict, total_pages, page_width=612, page_height=792
 ):
-    """Generates a 1-page PDF cover sheet matching the dimensions of the target PDFs."""
+    """Generates a 1-page PDF cover sheet using only user-selected metadata fields."""
     packet = io.BytesIO()
-
-    # Set custom page size matching the input PDF dimensions
     can = canvas.Canvas(
         packet, pagesize=(float(page_width), float(page_height))
     )
 
-    address_str = "" if pd.isna(address) else str(address)
-    postcode_str = "" if pd.isna(postcode) else str(postcode)
-
-    # Calculate center position based on actual width
     center_x = float(page_width) / 2.0
     center_y = float(page_height) / 2.0
 
-    # Store Name
-    can.setFont("Helvetica-Bold", 24)
-    can.drawCentredString(center_x, center_y + 40, str(store_name))
+    # Total items to render (Metadata lines + Total Pages line)
+    total_lines = len(metadata_dict) + 1
+    line_height = 30
+    start_y = center_y + ((total_lines * line_height) / 2.0)
 
-    # Address & Postcode
-    can.setFont("Helvetica", 14)
-    location_line = f"Address: {address_str}"
-    if postcode_str:
-        location_line += f" | Postcode: {postcode_str}"
-    can.drawCentredString(center_x, center_y, location_line)
+    current_y = start_y
 
-    # Total Pages
+    # Render selected metadata lines
+    for idx, (label, val) in enumerate(metadata_dict.items()):
+        val_str = "" if pd.isna(val) else str(val)
+
+        # Make the first selected metadata field (usually Store Name) larger and bold
+        if idx == 0:
+            can.setFont("Helvetica-Bold", 22)
+            can.drawCentredString(center_x, current_y, f"{val_str}")
+        else:
+            can.setFont("Helvetica", 13)
+            can.drawCentredString(center_x, current_y, f"{label}: {val_str}")
+
+        current_y -= line_height
+
+    # Render Total Pages line
     can.setFont("Helvetica-Bold", 14)
-    can.drawCentredString(center_x, center_y - 35, f"Total Pages: {total_pages}")
+    can.drawCentredString(center_x, current_y, f"Total Pages: {total_pages}")
 
     can.save()
     packet.seek(0)
@@ -50,132 +54,164 @@ st.set_page_config(
 )
 st.title("📄 PDF Store Batch Consolidator")
 st.write(
-    "Upload your target PDF files and your Excel control sheet to generate the master PDF."
+    "Upload your Excel sheet first, configure cover page fields, then upload target PDFs to generate your master file."
 )
 
 st.divider()
 
-uploaded_pdfs = st.file_uploader(
-    "1. Upload PDF Files", type=["pdf"], accept_multiple_files=True
-)
+# Step 1: Upload Excel Control Sheet
 uploaded_excel = st.file_uploader(
-    "2. Upload Excel Control Sheet", type=["xlsx", "xls"]
+    "1. Upload Excel Control Sheet First", type=["xlsx", "xls"]
 )
 
-st.divider()
+selected_metadata_cols = []
+file_columns = []
+df_control = None
 
-if st.button("Generate Master PDF", type="primary"):
-    if not uploaded_pdfs:
-        st.error("Please upload at least one PDF file.")
-    elif not uploaded_excel:
-        st.error("Please upload an Excel control sheet.")
-    else:
-        with st.spinner("Processing documents and compiling PDF..."):
-            pdf_dict = {
-                pdf_file.name.lower(): pdf_file for pdf_file in uploaded_pdfs
-            }
-            excel_basename = os.path.splitext(uploaded_excel.name)[0]
-            output_filename = f"{excel_basename}_Consolidated.pdf"
+if uploaded_excel:
+    df_control = pd.read_excel(uploaded_excel)
 
-            df_control = pd.read_excel(uploaded_excel)
+    # Separate non-PDF metadata columns from PDF file columns
+    all_columns = [
+        str(col)
+        for col in df_control.columns
+        if not str(col).startswith("Unnamed:")
+    ]
 
-            non_pdf_columns = [
-                "Store Name",
-                "Address",
-                "Postcode",
-                "Post Code",
-                "Zip",
-            ]
-            store_col_name = df_control.columns[0]
+    non_pdf_candidates = []
+    file_columns = []
 
-            file_columns = [
-                col
-                for col in df_control.columns[1:]
-                if not str(col).startswith("Unnamed:")
-                and str(col).strip() not in non_pdf_columns
-            ]
+    for col in all_columns:
+        # Check if header ends with .pdf (case insensitive)
+        if col.strip().lower().endswith(".pdf"):
+            file_columns.append(col)
+        else:
+            non_pdf_candidates.append(col)
 
-            pdf_writer = PdfWriter()
+    st.subheader("📋 Select Metadata for Cover Header Page")
+    st.write(
+        "Check the column headers below that you want displayed on each store's cover page:"
+    )
 
-            for index, row in df_control.iterrows():
-                store_name = row[store_col_name]
-                if pd.isna(store_name):
-                    continue
+    # Display checkboxes for non-PDF column headers
+    cols_per_row = st.columns(min(len(non_pdf_candidates), 3) or 1)
+    for idx, col_name in enumerate(non_pdf_candidates):
+        with cols_per_row[idx % 3]:
+            # Default to checked
+            if st.checkbox(col_name, value=True, key=f"meta_{col_name}"):
+                selected_metadata_cols.append(col_name)
 
-                address_val = row.get("Address", "")
-                postcode_val = row.get("Postcode", row.get("Post Code", ""))
+    st.divider()
 
-                content_page_count = 0
-                valid_files_to_add = []
-                detected_width = 612   # Default to Letter width
-                detected_height = 792  # Default to Letter height
+    # Step 2: Upload Target PDFs
+    uploaded_pdfs = st.file_uploader(
+        "2. Upload PDF Files", type=["pdf"], accept_multiple_files=True
+    )
 
-                for file_name in file_columns:
-                    qty_value = row[file_name]
+    st.divider()
 
-                    if pd.notna(qty_value):
-                        try:
-                            qty = int(qty_value)
-                        except ValueError:
-                            continue
+    # Step 3: Generate
+    if st.button("Generate Master PDF", type="primary"):
+        if not uploaded_pdfs:
+            st.error("Please upload the target PDF files.")
+        else:
+            with st.spinner("Processing documents and compiling PDF..."):
+                pdf_dict = {
+                    pdf_file.name.lower(): pdf_file
+                    for pdf_file in uploaded_pdfs
+                }
+                excel_basename = os.path.splitext(uploaded_excel.name)[0]
+                output_filename = f"{excel_basename}_Consolidated.pdf"
 
-                        if qty > 0:
-                            pdf_key = str(file_name).strip().lower()
-                            if not pdf_key.endswith(".pdf"):
-                                pdf_key += ".pdf"
+                # If no explicit .pdf headers were found, treat remaining unselected columns as file names
+                if not file_columns:
+                    file_columns = [
+                        c
+                        for c in all_columns
+                        if c not in selected_metadata_cols
+                    ]
 
-                            if pdf_key in pdf_dict:
-                                pdf_file_obj = pdf_dict[pdf_key]
-                                pdf_file_obj.seek(0)
-                                reader = PdfReader(pdf_file_obj)
+                pdf_writer = PdfWriter()
 
-                                # Extract dimensions from the first page of the PDF
-                                if reader.pages:
-                                    first_page = reader.pages[0]
-                                    detected_width = float(
-                                        first_page.mediabox.width
+                for index, row in df_control.iterrows():
+                    # Extract selected metadata for this store
+                    metadata_dict = {
+                        col: row[col]
+                        for col in selected_metadata_cols
+                        if col in row
+                    }
+
+                    content_page_count = 0
+                    valid_files_to_add = []
+                    detected_width = 612
+                    detected_height = 792
+
+                    for file_name in file_columns:
+                        qty_value = row[file_name]
+
+                        if pd.notna(qty_value):
+                            try:
+                                qty = int(qty_value)
+                            except ValueError:
+                                continue
+
+                            if qty > 0:
+                                pdf_key = str(file_name).strip().lower()
+                                if not pdf_key.endswith(".pdf"):
+                                    pdf_key += ".pdf"
+
+                                if pdf_key in pdf_dict:
+                                    pdf_file_obj = pdf_dict[pdf_key]
+                                    pdf_file_obj.seek(0)
+                                    reader = PdfReader(pdf_file_obj)
+
+                                    if reader.pages:
+                                        first_page = reader.pages[0]
+                                        detected_width = float(
+                                            first_page.mediabox.width
+                                        )
+                                        detected_height = float(
+                                            first_page.mediabox.height
+                                        )
+
+                                    pages_in_file = len(reader.pages)
+                                    content_page_count += pages_in_file * qty
+                                    valid_files_to_add.append(
+                                        (pdf_file_obj, qty)
                                     )
-                                    detected_height = float(
-                                        first_page.mediabox.height
+                                else:
+                                    st.warning(
+                                        f"File '{pdf_key}' referenced in sheet was not uploaded."
                                     )
 
-                                pages_in_file = len(reader.pages)
-                                content_page_count += pages_in_file * qty
-                                valid_files_to_add.append((pdf_file_obj, qty))
-                            else:
-                                st.warning(
-                                    f"File '{pdf_key}' referenced in sheet was not uploaded."
-                                )
+                    total_pages_for_store = 1 + content_page_count
 
-                total_pages_for_store = 1 + content_page_count
+                    # Build Cover Header Page with checked metadata fields
+                    header_pdf = create_header_pdf(
+                        metadata_dict,
+                        total_pages_for_store,
+                        page_width=detected_width,
+                        page_height=detected_height,
+                    )
+                    pdf_writer.add_page(header_pdf.pages[0])
 
-                # Add Cover Header Page matching the detected dimensions
-                header_pdf = create_header_pdf(
-                    store_name,
-                    address_val,
-                    postcode_val,
-                    total_pages_for_store,
-                    page_width=detected_width,
-                    page_height=detected_height,
+                    # Append content PDFs
+                    for pdf_file_obj, qty in valid_files_to_add:
+                        pdf_file_obj.seek(0)
+                        reader = PdfReader(pdf_file_obj)
+                        for _ in range(qty):
+                            for page in reader.pages:
+                                pdf_writer.add_page(page)
+
+                output_buffer = io.BytesIO()
+                pdf_writer.write(output_buffer)
+                output_buffer.seek(0)
+
+                st.success("Master PDF generated successfully!")
+
+                st.download_button(
+                    label=f"⬇️ Download {output_filename}",
+                    data=output_buffer,
+                    file_name=output_filename,
+                    mime="application/pdf",
                 )
-                pdf_writer.add_page(header_pdf.pages[0])
-
-                for pdf_file_obj, qty in valid_files_to_add:
-                    pdf_file_obj.seek(0)
-                    reader = PdfReader(pdf_file_obj)
-                    for _ in range(qty):
-                        for page in reader.pages:
-                            pdf_writer.add_page(page)
-
-            output_buffer = io.BytesIO()
-            pdf_writer.write(output_buffer)
-            output_buffer.seek(0)
-
-            st.success("Master PDF generated successfully!")
-
-            st.download_button(
-                label=f"⬇️ Download {output_filename}",
-                data=output_buffer,
-                file_name=output_filename,
-                mime="application/pdf",
-            )
