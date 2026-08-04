@@ -91,11 +91,87 @@ if st.session_state.current_page == "impose":
 # ---------------------------------------------------------
 # PAGE 2: DUPLICATE PAGES
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# PAGE 2: DUPLICATE PAGES
+# ---------------------------------------------------------
 elif st.session_state.current_page == "duplicate":
     st.subheader("📄 Duplicate Pages Tool")
-    st.write("Duplicate specific pages or multiply entire PDF documents.")
-    st.info("Feature placeholder: Upload PDFs to set duplication parameters.")
+    st.write(
+        "Upload a multi-page PDF and an Excel sheet specifying the repeat quantity for each page."
+    )
 
+    col_a, col_b = st.columns(2)
+    with col_a:
+        uploaded_pdf = st.file_uploader("1. Upload PDF File", type=["pdf"])
+    with col_b:
+        uploaded_excel = st.file_uploader(
+            "2. Upload Excel Control Sheet",
+            type=["xlsx", "xls"],
+            key="dup_excel",
+        )
+
+    mode = st.radio(
+        "3. Select Printing Mode:",
+        ["Simplex", "Duplex"],
+        horizontal=True,
+        help="Simplex repeats each page N times. Duplex doubles the repeat count (2 × N times).",
+    )
+
+    if uploaded_pdf and uploaded_excel:
+        df_dup = pd.read_excel(uploaded_excel)
+
+        # Allow user to select which column contains the quantities
+        qty_col = st.selectbox(
+            "Select Quantity/Copies Column from Excel:",
+            df_dup.columns,
+            index=len(df_dup.columns) - 1,
+        )
+
+        st.divider()
+
+        if st.button("Generate Duplicated PDF", type="primary"):
+            with st.spinner("Processing PDF page duplications..."):
+                reader = PdfReader(uploaded_pdf)
+                pdf_writer = PdfWriter()
+                total_pdf_pages = len(reader.pages)
+
+                multiplier = 2 if mode == "Duplex" else 1
+
+                # Loop through each page of the input PDF (Row 1 = Page 1, Row 2 = Page 2, etc.)
+                for idx in range(total_pdf_pages):
+                    page_num = idx + 1
+
+                    # Read quantity from Excel row corresponding to page index
+                    if idx < len(df_dup):
+                        raw_qty = df_dup.iloc[idx][qty_col]
+                        try:
+                            qty = int(raw_qty) if pd.notna(raw_qty) else 0
+                        except ValueError:
+                            qty = 0
+                    else:
+                        qty = 0
+
+                    total_copies = qty * multiplier
+
+                    if total_copies > 0:
+                        page_obj = reader.pages[idx]
+                        for _ in range(total_copies):
+                            pdf_writer.add_page(page_obj)
+
+                output_buffer = io.BytesIO()
+                pdf_writer.write(output_buffer)
+                output_buffer.seek(0)
+
+                pdf_basename = os.path.splitext(uploaded_pdf.name)[0]
+                out_filename = f"{pdf_basename}_{mode}_Duplicated.pdf"
+
+                st.success(f"Successfully generated duplicated PDF in **{mode}** mode!")
+                st.download_button(
+                    label=f"⬇️ Download {out_filename}",
+                    data=output_buffer,
+                    file_name=out_filename,
+                    mime="application/pdf",
+                )
 # ---------------------------------------------------------
 # PAGE 3: PDF STORE BATCH CONSOLIDATOR
 # ---------------------------------------------------------
