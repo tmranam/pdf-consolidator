@@ -17,7 +17,7 @@ if "current_page" not in st.session_state:
     st.session_state.current_page = "batch_consolidator"
 
 
-# Helper function for cover pages
+# Helper function for consolidator cover pages
 def create_header_pdf(
     metadata_dict, total_pages, page_width=612, page_height=792
 ):
@@ -54,27 +54,67 @@ def create_header_pdf(
     return PdfReader(packet)
 
 
+# Helper function for Batch Headers generator
+def create_batch_header_file(
+    job_no, description, total_batches, auto_number=True
+):
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=letter)
+    page_width, page_height = letter
+
+    center_x = page_width / 2.0
+
+    # Draw pages
+    for i in range(1, total_batches + 1):
+        # 1. Job No. (Large font, top portion)
+        can.setFont("Helvetica-Bold", 80)
+        can.drawCentredString(center_x, page_height - 130, str(job_no))
+
+        # 2. Description (Top portion, under Job No.)
+        can.setFont("Helvetica-Bold", 36)
+        can.drawCentredString(center_x, page_height - 210, str(description))
+
+        # 3. Batch Numbering (Top half bit, ~80pt font)
+        can.setFont("Helvetica-Bold", 80)
+        if auto_number:
+            batch_str = f"BATCH {i} OF {total_batches}"
+        else:
+            batch_str = f"BATCH {i} OF ______"
+
+        can.drawCentredString(center_x, page_height - 320, batch_str)
+
+        can.showPage()
+
+    can.save()
+    packet.seek(0)
+    return packet
+
+
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
 # ---------------------------------------------------------
 st.title("🛠️ PDF Toolsuite Dashboard")
 st.write("Select a tool below to begin processing your files:")
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
     if st.button("📐 Impose", use_container_width=True):
         st.session_state.current_page = "impose"
 
 with col2:
-    if st.button("📄 Duplicate Pages", use_container_width=True):
+    if st.button("📄 Duplicate", use_container_width=True):
         st.session_state.current_page = "duplicate"
 
 with col3:
-    if st.button("📦 Batch Consolidator", use_container_width=True):
+    if st.button("📦 Consolidator", use_container_width=True):
         st.session_state.current_page = "batch_consolidator"
 
 with col4:
+    if st.button("🏷️ Batch Headers", use_container_width=True):
+        st.session_state.current_page = "batch_headers"
+
+with col5:
     if st.button("⚙️ General", use_container_width=True):
         st.session_state.current_page = "general"
 
@@ -88,9 +128,6 @@ if st.session_state.current_page == "impose":
     st.write("Layout and arrange pages for print imposition (e.g., 2-up, 4-up).")
     st.info("Feature placeholder: Upload PDFs to begin imposition layout.")
 
-# ---------------------------------------------------------
-# PAGE 2: DUPLICATE PAGES
-# ---------------------------------------------------------
 # ---------------------------------------------------------
 # PAGE 2: DUPLICATE PAGES
 # ---------------------------------------------------------
@@ -120,7 +157,6 @@ elif st.session_state.current_page == "duplicate":
     if uploaded_pdf and uploaded_excel:
         df_dup = pd.read_excel(uploaded_excel)
 
-        # Allow user to select which column contains the quantities
         qty_col = st.selectbox(
             "Select Quantity/Copies Column from Excel:",
             df_dup.columns,
@@ -137,11 +173,7 @@ elif st.session_state.current_page == "duplicate":
 
                 multiplier = 2 if mode == "Duplex" else 1
 
-                # Loop through each page of the input PDF (Row 1 = Page 1, Row 2 = Page 2, etc.)
                 for idx in range(total_pdf_pages):
-                    page_num = idx + 1
-
-                    # Read quantity from Excel row corresponding to page index
                     if idx < len(df_dup):
                         raw_qty = df_dup.iloc[idx][qty_col]
                         try:
@@ -165,13 +197,16 @@ elif st.session_state.current_page == "duplicate":
                 pdf_basename = os.path.splitext(uploaded_pdf.name)[0]
                 out_filename = f"{pdf_basename}_{mode}_Duplicated.pdf"
 
-                st.success(f"Successfully generated duplicated PDF in **{mode}** mode!")
+                st.success(
+                    f"Successfully generated duplicated PDF in **{mode}** mode!"
+                )
                 st.download_button(
                     label=f"⬇️ Download {out_filename}",
                     data=output_buffer,
                     file_name=out_filename,
                     mime="application/pdf",
                 )
+
 # ---------------------------------------------------------
 # PAGE 3: PDF STORE BATCH CONSOLIDATOR
 # ---------------------------------------------------------
@@ -428,9 +463,54 @@ elif st.session_state.current_page == "batch_consolidator":
                         )
 
 # ---------------------------------------------------------
-# PAGE 4: GENERAL
+# PAGE 4: BATCH HEADERS
 # ---------------------------------------------------------
-elif st.session_state.current_page == "general":
-    st.subheader("⚙️ General Settings & Tools")
-    st.write("General PDF utilities, preferences, and application information.")
-    st.info("Feature placeholder: Configure global PDF defaults or settings.")
+elif st.session_state.current_page == "batch_headers":
+    st.subheader("🏷️ Batch Headers Generator")
+    st.write(
+        "Generate print header sheets with large typography for print jobs and batch tracking."
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        job_no = st.text_input("Job No.:", value="054520")
+    with col2:
+        description = st.text_input("Description:", value="Fragrance Wk5-6")
+
+    total_batches = st.number_input(
+        "Total Batches (Number of Pages):",
+        min_value=1,
+        max_value=1000,
+        value=20,
+        step=1,
+    )
+
+    auto_number = st.checkbox(
+        "Include Total Count (e.g. '1 OF 20')?",
+        value=True,
+        help="If checked, numbers each page as '1 OF 20', '2 OF 20'. If unchecked, prints '1 OF ______' for manual entry.",
+    )
+
+    st.divider()
+
+    if st.button("Generate Batch Headers PDF", type="primary"):
+        with st.spinner("Generating batch header sheets..."):
+            pdf_bytes = create_batch_header_file(
+                job_no=job_no,
+                description=description,
+                total_batches=int(total_batches),
+                auto_number=auto_number,
+            )
+
+            out_filename = f"{job_no}_Batch_Headers.pdf"
+
+            st.success("Batch headers generated successfully!")
+            st.download_button(
+                label=f"⬇️ Download {out_filename}",
+                data=pdf_bytes,
+                file_name=out_filename,
+                mime="application/pdf",
+            )
+
+# ---------------------------------------------------------
+# PAGE 5: GENERAL
