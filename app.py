@@ -3,8 +3,8 @@ import os
 import zipfile
 import pandas as pd
 from pypdf import PdfReader, PdfWriter
-from reportlab.lib.pagesizes import A4, letter
 from reportlab.lib.colors import HexColor
+from reportlab.lib.pagesizes import A4, letter
 from reportlab.pdfgen import canvas
 import streamlit as st
 
@@ -67,33 +67,24 @@ def create_batch_header_file(
 
     center_x = page_width / 2.0
 
-    # Draw pages
     for i in range(1, total_batches + 1):
-        # 1. Job No. (Large font at the top)
+        # 1. Job No.
         can.setFont("Helvetica-Bold", 70)
         can.drawCentredString(center_x, page_height - 110, str(job_no))
 
-        # 2. Description (Under Job No.)
+        # 2. Description
         can.setFont("Helvetica-Bold", 32)
         can.drawCentredString(center_x, page_height - 170, str(description))
 
-        # 3. Batch Numbering on 3 separate lines
+        # 3. Batch Numbering
         can.setFont("Helvetica-Bold", 90)
-
-        # Line 1: Current Batch Number (e.g. 1)
         can.drawCentredString(center_x, page_height - 290, str(i))
 
-        # Line 2: OF
         can.setFont("Helvetica-Bold", 50)
         can.drawCentredString(center_x, page_height - 370, "OF")
 
-        # Line 3: Total Batches (e.g. 12 or ______ )
         can.setFont("Helvetica-Bold", 90)
-        if auto_number:
-            total_str = str(total_batches)
-        else:
-            total_str = "______"
-
+        total_str = str(total_batches) if auto_number else "______"
         can.drawCentredString(center_x, page_height - 470, total_str)
 
         can.showPage()
@@ -105,44 +96,43 @@ def create_batch_header_file(
 
 # Helper function for Outside Work Label generator
 def create_outside_work_label_file(
-    supplier, job_no, client, job_title, qty_this_pallet, total_pallets
+    supplier,
+    job_no,
+    client,
+    job_title,
+    qty_this_pallet,
+    total_pallets,
+    auto_number_pallets=True,
 ):
     packet = io.BytesIO()
     can = canvas.Canvas(packet, pagesize=A4)
     page_width, page_height = A4
 
-    margin = 36
-    content_width = page_width - (margin * 2)
+    margin = 40
+    primary_blue = HexColor("#002F6C")  # IVE Corporate Blue
 
     for i in range(1, total_pallets + 1):
-        # Top Header Section: From Address & Logo Header
-        can.setFont("Helvetica-Bold", 10)
-        can.drawString(margin, page_height - 45, "From:")
-        can.setFont("Helvetica-Bold", 12)
-        can.drawString(margin, page_height - 60, "IVE Print")
-        can.setFont("Helvetica", 10)
-        can.drawString(margin, page_height - 73, "24-36 Beyer Rd, Braeside")
-        can.drawString(margin, page_height - 86, "Victoria 3195")
-
-        # IVE Logo Placeholder Text
-        can.setFont("Helvetica-Bold", 28)
-        can.setFillColor(HexColor("#FF3300"))
-        can.drawRightString(page_width - margin, page_height - 65, "ive")
+        # Top Header Section: Address
         can.setFillColor(HexColor("#000000"))
+        can.setFont("Helvetica-Bold", 11)
+        can.drawString(margin, page_height - 45, "From:")
+        can.setFont("Helvetica-Bold", 13)
+        can.drawString(margin, page_height - 62, "IVE Print")
+        can.setFont("Helvetica", 10)
+        can.drawString(margin, page_height - 76, "24-36 Beyer Rd, Braeside")
+        can.drawString(margin, page_height - 89, "Victoria 3195")
 
-        # Large Header: OUTSIDE WORK
-        can.setFont("Helvetica-Bold", 42)
+        # Top Right IVE Logo Text
+        can.setFont("Helvetica-Bold", 36)
+        can.setFillColor(primary_blue)
+        can.drawRightString(page_width - margin, page_height - 75, "ive")
+
+        # Blue Title Banner: OUTSIDE WORK
+        can.setFont("Helvetica-Bold", 46)
         can.drawCentredString(page_width / 2.0, page_height - 145, "OUTSIDE")
-        can.drawCentredString(page_width / 2.0, page_height - 190, "WORK")
+        can.drawCentredString(page_width / 2.0, page_height - 192, "WORK")
 
-        # Horizontal Divider
-        can.setLineWidth(2)
-        can.line(margin, page_height - 210, page_width - margin, page_height - 210)
-
-        # Key-Value Form Fields Layout
-        y = page_height - 245
-        line_gap = 58
-
+        # Form Fields
         fields = [
             ("Supplier:", supplier),
             ("Job No:", job_no),
@@ -151,31 +141,45 @@ def create_outside_work_label_file(
             ("Qty this pallet:", qty_this_pallet),
         ]
 
+        y = page_height - 240
+        line_gap = 62
+
         for label, val in fields:
-            can.setFont("Helvetica-Bold", 16)
+            can.setFillColor(HexColor("#000000"))
+            can.setFont("Helvetica-Bold", 15)
             can.drawString(margin, y, label)
 
-            can.setFont("Helvetica-Bold", 28)
+            # Draw Value in bold blue text matching uploaded design
+            can.setFillColor(primary_blue)
+            can.setFont("Helvetica-Bold", 26)
             can.drawString(margin, y - 28, str(val) if val else "")
 
+            # Underline divider
+            can.setStrokeColor(HexColor("#CCCCCC"))
             can.setLineWidth(1)
-            can.line(margin, y - 35, page_width - margin, y - 35)
+            can.line(margin, y - 36, page_width - margin, y - 36)
 
             y -= line_gap
 
         # Bottom Section: Pallet X of Y
         y_pallet = y - 10
-        can.setFont("Helvetica-Bold", 20)
+
+        can.setFillColor(HexColor("#000000"))
+        can.setFont("Helvetica-Bold", 22)
         can.drawString(margin, y_pallet, "Pallet:")
 
-        can.setFont("Helvetica-Bold", 48)
-        can.drawString(margin + 80, y_pallet - 5, str(i))
+        can.setFillColor(primary_blue)
+        can.setFont("Helvetica-Bold", 52)
+        can.drawString(margin + 85, y_pallet - 6, str(i))
 
-        can.setFont("Helvetica-Bold", 20)
-        can.drawString(margin + 170, y_pallet, "of:")
+        can.setFillColor(HexColor("#000000"))
+        can.setFont("Helvetica-Bold", 22)
+        can.drawString(margin + 185, y_pallet, "of:")
 
-        can.setFont("Helvetica-Bold", 48)
-        can.drawString(margin + 210, y_pallet - 5, str(total_pallets))
+        can.setFillColor(primary_blue)
+        can.setFont("Helvetica-Bold", 52)
+        total_str = str(total_pallets) if auto_number_pallets else "______"
+        can.drawString(margin + 225, y_pallet - 6, total_str)
 
         can.showPage()
 
@@ -669,6 +673,12 @@ elif st.session_state.current_page == "batches_and_labels":
                     step=1,
                 )
 
+            auto_number_pallets = st.checkbox(
+                "Include Total Pallet Count (e.g. '1 of 5')?",
+                value=True,
+                help="If checked, displays '1 of 5'. If unchecked, leaves it blank as '1 of ______'.",
+            )
+
             st.divider()
 
             if st.button("Generate Outside Work Label PDF", type="primary"):
@@ -680,6 +690,7 @@ elif st.session_state.current_page == "batches_and_labels":
                         job_title=job_title,
                         qty_this_pallet=qty_this_pallet,
                         total_pallets=int(total_pallets),
+                        auto_number_pallets=auto_number_pallets,
                     )
 
                     out_filename = f"{job_no}_Outside_Work_Label.pdf"
