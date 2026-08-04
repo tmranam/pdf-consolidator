@@ -7,24 +7,38 @@ from reportlab.pdfgen import canvas
 import streamlit as st
 
 
-def create_header_pdf(store_name, address, postcode, total_pages):
+def create_header_pdf(
+    store_name, address, postcode, total_pages, page_width=612, page_height=792
+):
+    """Generates a 1-page PDF cover sheet matching the dimensions of the target PDFs."""
     packet = io.BytesIO()
-    can = canvas.Canvas(packet, pagesize=letter)
+
+    # Set custom page size matching the input PDF dimensions
+    can = canvas.Canvas(
+        packet, pagesize=(float(page_width), float(page_height))
+    )
 
     address_str = "" if pd.isna(address) else str(address)
     postcode_str = "" if pd.isna(postcode) else str(postcode)
 
-    can.setFont("Helvetica-Bold", 24)
-    can.drawCentredString(300, 520, str(store_name))
+    # Calculate center position based on actual width
+    center_x = float(page_width) / 2.0
+    center_y = float(page_height) / 2.0
 
+    # Store Name
+    can.setFont("Helvetica-Bold", 24)
+    can.drawCentredString(center_x, center_y + 40, str(store_name))
+
+    # Address & Postcode
     can.setFont("Helvetica", 14)
     location_line = f"Address: {address_str}"
     if postcode_str:
         location_line += f" | Postcode: {postcode_str}"
-    can.drawCentredString(300, 485, location_line)
+    can.drawCentredString(center_x, center_y, location_line)
 
+    # Total Pages
     can.setFont("Helvetica-Bold", 14)
-    can.drawCentredString(300, 450, f"Total Pages: {total_pages}")
+    can.drawCentredString(center_x, center_y - 35, f"Total Pages: {total_pages}")
 
     can.save()
     packet.seek(0)
@@ -93,6 +107,8 @@ if st.button("Generate Master PDF", type="primary"):
 
                 content_page_count = 0
                 valid_files_to_add = []
+                detected_width = 612   # Default to Letter width
+                detected_height = 792  # Default to Letter height
 
                 for file_name in file_columns:
                     qty_value = row[file_name]
@@ -113,11 +129,19 @@ if st.button("Generate Master PDF", type="primary"):
                                 pdf_file_obj.seek(0)
                                 reader = PdfReader(pdf_file_obj)
 
+                                # Extract dimensions from the first page of the PDF
+                                if reader.pages:
+                                    first_page = reader.pages[0]
+                                    detected_width = float(
+                                        first_page.mediabox.width
+                                    )
+                                    detected_height = float(
+                                        first_page.mediabox.height
+                                    )
+
                                 pages_in_file = len(reader.pages)
                                 content_page_count += pages_in_file * qty
-                                valid_files_to_add.append(
-                                    (pdf_file_obj, qty)
-                                )
+                                valid_files_to_add.append((pdf_file_obj, qty))
                             else:
                                 st.warning(
                                     f"File '{pdf_key}' referenced in sheet was not uploaded."
@@ -125,8 +149,14 @@ if st.button("Generate Master PDF", type="primary"):
 
                 total_pages_for_store = 1 + content_page_count
 
+                # Add Cover Header Page matching the detected dimensions
                 header_pdf = create_header_pdf(
-                    store_name, address_val, postcode_val, total_pages_for_store
+                    store_name,
+                    address_val,
+                    postcode_val,
+                    total_pages_for_store,
+                    page_width=detected_width,
+                    page_height=detected_height,
                 )
                 pdf_writer.add_page(header_pdf.pages[0])
 
