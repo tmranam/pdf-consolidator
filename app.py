@@ -94,7 +94,7 @@ def create_batch_header_file(
     return packet
 
 
-# Helper function for Outside Work Label generator
+# Helper function for Outside Work Label generator (Blue Background + White Text)
 def create_outside_work_label_file(
     supplier,
     job_no,
@@ -109,11 +109,16 @@ def create_outside_work_label_file(
     page_width, page_height = A4
 
     margin = 40
-    primary_blue = HexColor("#002F6C")  # IVE Corporate Blue
+    bg_blue = HexColor("#002F6C")
+    text_white = HexColor("#FFFFFF")
 
     for i in range(1, total_pallets + 1):
-        # Top Header Section: Address
-        can.setFillColor(HexColor("#000000"))
+        # 1. Fill Entire Background with Dark Blue
+        can.setFillColor(bg_blue)
+        can.rect(0, 0, page_width, page_height, fill=1, stroke=0)
+
+        # 2. Top Header Section: Address
+        can.setFillColor(text_white)
         can.setFont("Helvetica-Bold", 11)
         can.drawString(margin, page_height - 45, "From:")
         can.setFont("Helvetica-Bold", 13)
@@ -122,17 +127,16 @@ def create_outside_work_label_file(
         can.drawString(margin, page_height - 76, "24-36 Beyer Rd, Braeside")
         can.drawString(margin, page_height - 89, "Victoria 3195")
 
-        # Top Right IVE Logo Text
+        # Top Right Logo Text
         can.setFont("Helvetica-Bold", 36)
-        can.setFillColor(primary_blue)
         can.drawRightString(page_width - margin, page_height - 75, "ive")
 
-        # Blue Title Banner: OUTSIDE WORK
+        # Title Banner: OUTSIDE WORK
         can.setFont("Helvetica-Bold", 46)
         can.drawCentredString(page_width / 2.0, page_height - 145, "OUTSIDE")
         can.drawCentredString(page_width / 2.0, page_height - 192, "WORK")
 
-        # Form Fields
+        # Form Fields Configuration
         fields = [
             ("Supplier:", supplier),
             ("Job No:", job_no),
@@ -145,17 +149,14 @@ def create_outside_work_label_file(
         line_gap = 62
 
         for label, val in fields:
-            can.setFillColor(HexColor("#000000"))
             can.setFont("Helvetica-Bold", 15)
             can.drawString(margin, y, label)
 
-            # Draw Value in bold blue text matching uploaded design
-            can.setFillColor(primary_blue)
             can.setFont("Helvetica-Bold", 26)
             can.drawString(margin, y - 28, str(val) if val else "")
 
-            # Underline divider
-            can.setStrokeColor(HexColor("#CCCCCC"))
+            # White Underline Divider
+            can.setStrokeColor(text_white)
             can.setLineWidth(1)
             can.line(margin, y - 36, page_width - margin, y - 36)
 
@@ -164,19 +165,15 @@ def create_outside_work_label_file(
         # Bottom Section: Pallet X of Y
         y_pallet = y - 10
 
-        can.setFillColor(HexColor("#000000"))
         can.setFont("Helvetica-Bold", 22)
         can.drawString(margin, y_pallet, "Pallet:")
 
-        can.setFillColor(primary_blue)
         can.setFont("Helvetica-Bold", 52)
         can.drawString(margin + 85, y_pallet - 6, str(i))
 
-        can.setFillColor(HexColor("#000000"))
         can.setFont("Helvetica-Bold", 22)
         can.drawString(margin + 185, y_pallet, "of:")
 
-        can.setFillColor(primary_blue)
         can.setFont("Helvetica-Bold", 52)
         total_str = str(total_pallets) if auto_number_pallets else "______"
         can.drawString(margin + 225, y_pallet - 6, total_str)
