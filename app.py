@@ -3,7 +3,8 @@ import os
 import zipfile
 import pandas as pd
 from pypdf import PdfReader, PdfWriter
-from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.pagesizes import A4, letter
+from reportlab.lib.colors import HexColor
 from reportlab.pdfgen import canvas
 import streamlit as st
 
@@ -56,7 +57,7 @@ def create_header_pdf(
     return PdfReader(packet)
 
 
-# Helper function for Batch Headers generator
+# Helper function for Standard Batch Headers generator
 def create_batch_header_file(
     job_no, description, total_batches, auto_number=True
 ):
@@ -102,6 +103,87 @@ def create_batch_header_file(
     return packet
 
 
+# Helper function for Outside Work Label generator
+def create_outside_work_label_file(
+    supplier, job_no, client, job_title, qty_this_pallet, total_pallets
+):
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=A4)
+    page_width, page_height = A4
+
+    margin = 36
+    content_width = page_width - (margin * 2)
+
+    for i in range(1, total_pallets + 1):
+        # Top Header Section: From Address & Logo Header
+        can.setFont("Helvetica-Bold", 10)
+        can.drawString(margin, page_height - 45, "From:")
+        can.setFont("Helvetica-Bold", 12)
+        can.drawString(margin, page_height - 60, "IVE Print")
+        can.setFont("Helvetica", 10)
+        can.drawString(margin, page_height - 73, "24-36 Beyer Rd, Braeside")
+        can.drawString(margin, page_height - 86, "Victoria 3195")
+
+        # IVE Logo Placeholder Text
+        can.setFont("Helvetica-Bold", 28)
+        can.setFillColor(HexColor("#FF3300"))
+        can.drawRightString(page_width - margin, page_height - 65, "ive")
+        can.setFillColor(HexColor("#000000"))
+
+        # Large Header: OUTSIDE WORK
+        can.setFont("Helvetica-Bold", 42)
+        can.drawCentredString(page_width / 2.0, page_height - 145, "OUTSIDE")
+        can.drawCentredString(page_width / 2.0, page_height - 190, "WORK")
+
+        # Horizontal Divider
+        can.setLineWidth(2)
+        can.line(margin, page_height - 210, page_width - margin, page_height - 210)
+
+        # Key-Value Form Fields Layout
+        y = page_height - 245
+        line_gap = 58
+
+        fields = [
+            ("Supplier:", supplier),
+            ("Job No:", job_no),
+            ("Client:", client),
+            ("Job Title:", job_title),
+            ("Qty this pallet:", qty_this_pallet),
+        ]
+
+        for label, val in fields:
+            can.setFont("Helvetica-Bold", 16)
+            can.drawString(margin, y, label)
+
+            can.setFont("Helvetica-Bold", 28)
+            can.drawString(margin, y - 28, str(val) if val else "")
+
+            can.setLineWidth(1)
+            can.line(margin, y - 35, page_width - margin, y - 35)
+
+            y -= line_gap
+
+        # Bottom Section: Pallet X of Y
+        y_pallet = y - 10
+        can.setFont("Helvetica-Bold", 20)
+        can.drawString(margin, y_pallet, "Pallet:")
+
+        can.setFont("Helvetica-Bold", 48)
+        can.drawString(margin + 80, y_pallet - 5, str(i))
+
+        can.setFont("Helvetica-Bold", 20)
+        can.drawString(margin + 170, y_pallet, "of:")
+
+        can.setFont("Helvetica-Bold", 48)
+        can.drawString(margin + 210, y_pallet - 5, str(total_pallets))
+
+        can.showPage()
+
+    can.save()
+    packet.seek(0)
+    return packet
+
+
 # Helper function for Print Labels Imposition
 def create_labels_pdf(
     rows,
@@ -120,7 +202,6 @@ def create_labels_pdf(
     can = canvas.Canvas(packet, pagesize=A4)
     a4_w, a4_h = A4
 
-    labels_per_sheet = rows * cols
     current_label = 1
 
     while current_label <= total_labels:
@@ -129,13 +210,10 @@ def create_labels_pdf(
                 if current_label > total_labels:
                     break
 
-                # Calculate coordinates for top-left of the current label box
                 x_left = margin_x_pt + c * (label_w_pt + gutter_x_pt)
                 y_top = a4_h - margin_y_pt - r * (label_h_pt + gutter_y_pt)
-                y_bottom = y_top - label_h_pt
                 center_x = x_left + (label_w_pt / 2.0)
 
-                # Prepare lines list including sequential numbering if enabled
                 active_lines = list(lines_config)
                 if include_numbering:
                     active_lines.append(
@@ -146,7 +224,6 @@ def create_labels_pdf(
                         }
                     )
 
-                # Vertical positioning inside label bounding box
                 total_content_lines = len(active_lines)
                 if total_content_lines > 0:
                     line_height = label_h_pt / (total_content_lines + 1)
@@ -565,51 +642,98 @@ elif st.session_state.current_page == "batches_and_labels":
     if st.session_state.batches_subtab == "batch_headers":
         st.markdown("### 🏷️ Batch Headers Generator")
         st.write(
-            "Generate print header sheets with large typography for print jobs and batch tracking."
+            "Generate print header sheets or outside work pallet labels with custom parameters."
         )
 
-        col1, col2 = st.columns(2)
-        with col1:
-            job_no = st.text_input("Job No.:", value="054520")
-        with col2:
-            description = st.text_input(
-                "Description:", value="Fragrance Wk5-6"
+        is_outside_work = st.checkbox(
+            "Create Outside Work Label?",
+            value=False,
+            help="Check this box to format as an Outside Work Pallet Label sheet.",
+        )
+
+        if is_outside_work:
+            st.markdown("#### 📦 Outside Work Label Details")
+            col1, col2 = st.columns(2)
+            with col1:
+                supplier = st.text_input("Supplier:", value="")
+                job_no = st.text_input("Job No:", value="1615699")
+                client = st.text_input("Client:", value="Precision Mail Pty Ltd")
+            with col2:
+                job_title = st.text_input("Job Title:", value="Rase Spares Scratchys")
+                qty_this_pallet = st.text_input("Qty this Pallet:", value="1025")
+                total_pallets = st.number_input(
+                    "Total Pallets (Number of Pages):",
+                    min_value=1,
+                    max_value=1000,
+                    value=1,
+                    step=1,
+                )
+
+            st.divider()
+
+            if st.button("Generate Outside Work Label PDF", type="primary"):
+                with st.spinner("Generating Outside Work Label PDF..."):
+                    pdf_bytes = create_outside_work_label_file(
+                        supplier=supplier,
+                        job_no=job_no,
+                        client=client,
+                        job_title=job_title,
+                        qty_this_pallet=qty_this_pallet,
+                        total_pallets=int(total_pallets),
+                    )
+
+                    out_filename = f"{job_no}_Outside_Work_Label.pdf"
+
+                    st.success("Outside Work Label generated successfully!")
+                    st.download_button(
+                        label=f"⬇️ Download {out_filename}",
+                        data=pdf_bytes,
+                        file_name=out_filename,
+                        mime="application/pdf",
+                    )
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                job_no = st.text_input("Job No.:", value="054520")
+            with col2:
+                description = st.text_input(
+                    "Description:", value="Fragrance Wk5-6"
+                )
+
+            total_batches = st.number_input(
+                "Total Batches (Number of Pages):",
+                min_value=1,
+                max_value=1000,
+                value=20,
+                step=1,
             )
 
-        total_batches = st.number_input(
-            "Total Batches (Number of Pages):",
-            min_value=1,
-            max_value=1000,
-            value=20,
-            step=1,
-        )
+            auto_number = st.checkbox(
+                "Include Total Count (e.g. '1 OF 20')?",
+                value=True,
+                help="If checked, numbers each page as '1 OF 20', '2 OF 20'. If unchecked, prints '1 OF ______' for manual entry.",
+            )
 
-        auto_number = st.checkbox(
-            "Include Total Count (e.g. '1 OF 20')?",
-            value=True,
-            help="If checked, numbers each page as '1 OF 20', '2 OF 20'. If unchecked, prints '1 OF ______' for manual entry.",
-        )
+            st.divider()
 
-        st.divider()
+            if st.button("Generate Batch Headers PDF", type="primary"):
+                with st.spinner("Generating batch header sheets..."):
+                    pdf_bytes = create_batch_header_file(
+                        job_no=job_no,
+                        description=description,
+                        total_batches=int(total_batches),
+                        auto_number=auto_number,
+                    )
 
-        if st.button("Generate Batch Headers PDF", type="primary"):
-            with st.spinner("Generating batch header sheets..."):
-                pdf_bytes = create_batch_header_file(
-                    job_no=job_no,
-                    description=description,
-                    total_batches=int(total_batches),
-                    auto_number=auto_number,
-                )
+                    out_filename = f"{job_no}_Batch_Headers.pdf"
 
-                out_filename = f"{job_no}_Batch_Headers.pdf"
-
-                st.success("Batch headers generated successfully!")
-                st.download_button(
-                    label=f"⬇️ Download {out_filename}",
-                    data=pdf_bytes,
-                    file_name=out_filename,
-                    mime="application/pdf",
-                )
+                    st.success("Batch headers generated successfully!")
+                    st.download_button(
+                        label=f"⬇️ Download {out_filename}",
+                        data=pdf_bytes,
+                        file_name=out_filename,
+                        mime="application/pdf",
+                    )
 
     # --- SUBTAB 2: PRINT LABELS ---
     elif st.session_state.batches_subtab == "print_labels":
@@ -694,11 +818,11 @@ elif st.session_state.current_page == "batches_and_labels":
 
             with col_txt:
                 line_text = st.text_input(
-                    f"Text", value=f"Line {line_idx + 1} Content", key=f"lbl_txt_{line_idx}"
+                    "Text", value=f"Line {line_idx + 1} Content", key=f"lbl_txt_{line_idx}"
                 )
             with col_fs:
                 font_size = st.number_input(
-                    f"Font Size",
+                    "Font Size",
                     min_value=6,
                     max_value=72,
                     value=12,
@@ -707,7 +831,7 @@ elif st.session_state.current_page == "batches_and_labels":
                 )
             with col_bld:
                 is_bold = st.checkbox(
-                    f"Bold", value=False, key=f"lbl_bld_{line_idx}"
+                    "Bold", value=False, key=f"lbl_bld_{line_idx}"
                 )
 
             lines_config.append(
@@ -737,7 +861,6 @@ elif st.session_state.current_page == "batches_and_labels":
 
         if st.button("Generate Imposed Labels PDF", type="primary"):
             with st.spinner("Generating and imposing labels on A4..."):
-                # Convert mm to ReportLab points (1 mm = 2.83464567 points)
                 mm_to_pt = 2.83464567
                 label_w_pt = label_w_mm * mm_to_pt
                 label_h_pt = label_h_mm * mm_to_pt
