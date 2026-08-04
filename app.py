@@ -106,11 +106,11 @@ if uploaded_excel:
     st.subheader("⚙️ Batch Splitting Options")
     max_pages_per_file = st.number_input(
         "Maximum Target Pages Per PDF File:",
-        min_value=10,
-        max_value=5000,
+        min_value=1,
+        max_value=10000,
         value=50,
-        step=10,
-        help="The app will package as many full stores as possible without exceeding this page count per output file.",
+        step=5,
+        help="To fit multiple stores into one PDF, set this equal to or higher than their combined total pages.",
     )
 
     st.divider()
@@ -134,9 +134,10 @@ if uploaded_excel:
                         if c not in selected_metadata_cols
                     ]
 
-                # --- PHASE 1: Calculate exact structure & page count for each store ---
+                # --- PHASE 1: Calculate store page counts ---
                 store_data_list = []
                 max_single_store_pages = 0
+                grand_total_pages = 0
 
                 for index, row in df_control.iterrows():
                     metadata_dict = {
@@ -188,7 +189,9 @@ if uploaded_excel:
                                         f"File '{pdf_key}' referenced in sheet was not uploaded."
                                     )
 
+                    # 1 Header Page + PDF Content Pages
                     total_store_pages = 1 + content_page_count
+                    grand_total_pages += total_store_pages
 
                     if total_store_pages > max_single_store_pages:
                         max_single_store_pages = total_store_pages
@@ -203,24 +206,27 @@ if uploaded_excel:
                         }
                     )
 
-                # --- Check if user threshold is smaller than a single store ---
+                st.info(
+                    f"📊 **Total pages across all stores:** {grand_total_pages} pages "
+                    f"(Largest single store requires {max_single_store_pages} pages)."
+                )
+
+                # Adjust threshold if user limit is less than a single store
                 if max_pages_per_file < max_single_store_pages:
                     st.warning(
-                        f"⚠️ Notice: The largest single store requires **{max_single_store_pages} pages**. "
-                        f"Your target setting was {max_pages_per_file}. To prevent breaking any single store line across files, "
-                        f"the limit will automatically adjust to at least **{max_single_store_pages} pages** per batch."
+                        f"⚠️ **Limit adjusted:** The largest store needs **{max_single_store_pages} pages**. "
+                        f"The limit was raised to {max_single_store_pages} to keep each store complete."
                     )
                     effective_max = max(max_pages_per_file, max_single_store_pages)
                 else:
                     effective_max = max_pages_per_file
 
-                # --- PHASE 2: Group stores into batches cleanly ---
+                # --- PHASE 2: Group stores into batches ---
                 batches = []
                 current_batch = []
                 current_batch_page_count = 0
 
                 for store in store_data_list:
-                    # If adding this store exceeds the max target AND current batch isn't empty, create new batch
                     if (
                         current_batch_page_count + store["total_pages"]
                         > effective_max
@@ -238,14 +244,13 @@ if uploaded_excel:
 
                 total_batches = len(batches)
 
-                # --- PHASE 3: Generate PDF binary data for each batch ---
+                # --- PHASE 3: Build PDF files ---
                 generated_files = []
 
                 for batch_idx, batch_stores in enumerate(batches, start=1):
                     pdf_writer = PdfWriter()
 
                     for store in batch_stores:
-                        # Add Header
                         header_pdf = create_header_pdf(
                             store["metadata"],
                             store["total_pages"],
@@ -254,7 +259,6 @@ if uploaded_excel:
                         )
                         pdf_writer.add_page(header_pdf.pages[0])
 
-                        # Add Content PDFs
                         for pdf_file_obj, qty in store["files"]:
                             pdf_file_obj.seek(0)
                             reader = PdfReader(pdf_file_obj)
@@ -270,10 +274,10 @@ if uploaded_excel:
                     generated_files.append((batch_filename, buf.getvalue()))
 
                 st.success(
-                    f"Processing complete! Created {total_batches} batch file(s)."
+                    f"Processing complete! Generated {total_batches} batch file(s)."
                 )
 
-                # --- PHASE 4: Provide download options ---
+                # --- PHASE 4: Download buttons ---
                 if total_batches == 1:
                     filename, file_bytes = generated_files[0]
                     st.download_button(
@@ -283,7 +287,6 @@ if uploaded_excel:
                         mime="application/pdf",
                     )
                 else:
-                    # Package multiple batches into a single ZIP file for convenient download
                     zip_buffer = io.BytesIO()
                     with zipfile.ZipFile(
                         zip_buffer, "w", zipfile.ZIP_DEFLATED
@@ -294,9 +297,6 @@ if uploaded_excel:
                     zip_buffer.seek(0)
                     zip_filename = f"{excel_basename}_All_Batches.zip"
 
-                    st.info(
-                        f"Generated **{total_batches} batch files** following the naming scheme `Batch 1 of {total_batches}`, etc."
-                    )
                     st.download_button(
                         label=f"⬇️ Download All {total_batches} Batches (ZIP Archive)",
                         data=zip_buffer,
