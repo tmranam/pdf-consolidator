@@ -7,11 +7,20 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import streamlit as st
 
+# Set page layout once at the top
+st.set_page_config(
+    page_title="PDF Toolsuite Dashboard", page_icon="🛠️", layout="centered"
+)
 
+# Initialize navigation state
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "batch_consolidator"
+
+
+# Helper function for cover pages
 def create_header_pdf(
     metadata_dict, total_pages, page_width=612, page_height=792
 ):
-    """Generates a 1-page PDF cover sheet using user-selected metadata fields."""
     packet = io.BytesIO()
     can = canvas.Canvas(
         packet, pagesize=(float(page_width), float(page_height))
@@ -45,261 +54,307 @@ def create_header_pdf(
     return PdfReader(packet)
 
 
-st.set_page_config(
-    page_title="PDF Consolidator", page_icon="📄", layout="centered"
-)
-st.title("📄 PDF Store Batch Consolidator")
-st.write(
-    "Upload your Excel control sheet, select cover page fields, set batch limits, and process target PDFs."
-)
+# ---------------------------------------------------------
+# DASHBOARD NAVIGATION BAR
+# ---------------------------------------------------------
+st.title("🛠️ PDF Toolsuite Dashboard")
+st.write("Select a tool below to begin processing your files:")
+
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    if st.button("📐 Impose", use_container_width=True):
+        st.session_state.current_page = "impose"
+
+with col2:
+    if st.button("📄 Duplicate Pages", use_container_width=True):
+        st.session_state.current_page = "duplicate"
+
+with col3:
+    if st.button("📦 Batch Consolidator", use_container_width=True):
+        st.session_state.current_page = "batch_consolidator"
+
+with col4:
+    if st.button("⚙️ General", use_container_width=True):
+        st.session_state.current_page = "general"
 
 st.divider()
 
-# Step 1: Upload Excel Control Sheet
-uploaded_excel = st.file_uploader(
-    "1. Upload Excel Control Sheet First", type=["xlsx", "xls"]
-)
+# ---------------------------------------------------------
+# PAGE 1: IMPOSE
+# ---------------------------------------------------------
+if st.session_state.current_page == "impose":
+    st.subheader("📐 PDF Impose Tool")
+    st.write("Layout and arrange pages for print imposition (e.g., 2-up, 4-up).")
+    st.info("Feature placeholder: Upload PDFs to begin imposition layout.")
 
-selected_metadata_cols = []
-file_columns = []
-df_control = None
+# ---------------------------------------------------------
+# PAGE 2: DUPLICATE PAGES
+# ---------------------------------------------------------
+elif st.session_state.current_page == "duplicate":
+    st.subheader("📄 Duplicate Pages Tool")
+    st.write("Duplicate specific pages or multiply entire PDF documents.")
+    st.info("Feature placeholder: Upload PDFs to set duplication parameters.")
 
-if uploaded_excel:
-    df_control = pd.read_excel(uploaded_excel)
-
-    all_columns = [
-        str(col)
-        for col in df_control.columns
-        if not str(col).startswith("Unnamed:")
-    ]
-
-    non_pdf_candidates = []
-    file_columns = []
-
-    for col in all_columns:
-        if col.strip().lower().endswith(".pdf"):
-            file_columns.append(col)
-        else:
-            non_pdf_candidates.append(col)
-
-    st.subheader("📋 Select Metadata for Cover Header Page")
+# ---------------------------------------------------------
+# PAGE 3: PDF STORE BATCH CONSOLIDATOR
+# ---------------------------------------------------------
+elif st.session_state.current_page == "batch_consolidator":
+    st.subheader("📦 PDF Store Batch Consolidator")
     st.write(
-        "Check the column headers below that you want displayed on each store's cover page:"
+        "Upload your Excel control sheet, select cover page fields, set batch limits, and process target PDFs."
     )
 
-    cols_per_row = st.columns(min(len(non_pdf_candidates), 3) or 1)
-    for idx, col_name in enumerate(non_pdf_candidates):
-        with cols_per_row[idx % 3]:
-            if st.checkbox(col_name, value=True, key=f"meta_{col_name}"):
-                selected_metadata_cols.append(col_name)
-
-    st.divider()
-
-    # Step 2: Upload Target PDFs
-    uploaded_pdfs = st.file_uploader(
-        "2. Upload PDF Files", type=["pdf"], accept_multiple_files=True
+    uploaded_excel = st.file_uploader(
+        "1. Upload Excel Control Sheet First", type=["xlsx", "xls"]
     )
 
-    st.divider()
+    selected_metadata_cols = []
+    file_columns = []
+    df_control = None
 
-    # Step 3: Batching Settings
-    st.subheader("⚙️ Batch Splitting Options")
-    max_pages_per_file = st.number_input(
-        "Maximum Target Pages Per PDF File:",
-        min_value=1,
-        max_value=10000,
-        value=50,
-        step=5,
-        help="To fit multiple stores into one PDF, set this equal to or higher than their combined total pages.",
-    )
+    if uploaded_excel:
+        df_control = pd.read_excel(uploaded_excel)
 
-    st.divider()
+        all_columns = [
+            str(col)
+            for col in df_control.columns
+            if not str(col).startswith("Unnamed:")
+        ]
 
-    # Step 4: Generate
-    if st.button("Generate Master PDF(s)", type="primary"):
-        if not uploaded_pdfs:
-            st.error("Please upload the target PDF files.")
-        else:
-            with st.spinner("Analyzing document sizes and organizing batches..."):
-                pdf_dict = {
-                    pdf_file.name.lower(): pdf_file
-                    for pdf_file in uploaded_pdfs
-                }
-                excel_basename = os.path.splitext(uploaded_excel.name)[0]
+        non_pdf_candidates = []
+        file_columns = []
 
-                if not file_columns:
-                    file_columns = [
-                        c
-                        for c in all_columns
-                        if c not in selected_metadata_cols
-                    ]
+        for col in all_columns:
+            if col.strip().lower().endswith(".pdf"):
+                file_columns.append(col)
+            else:
+                non_pdf_candidates.append(col)
 
-                # --- PHASE 1: Calculate store page counts ---
-                store_data_list = []
-                max_single_store_pages = 0
-                grand_total_pages = 0
+        st.markdown("#### 📋 Select Metadata for Cover Header Page")
+        st.write(
+            "Check the column headers below that you want displayed on each store's cover page:"
+        )
 
-                for index, row in df_control.iterrows():
-                    metadata_dict = {
-                        col: row[col]
-                        for col in selected_metadata_cols
-                        if col in row
+        cols_per_row = st.columns(min(len(non_pdf_candidates), 3) or 1)
+        for idx, col_name in enumerate(non_pdf_candidates):
+            with cols_per_row[idx % 3]:
+                if st.checkbox(col_name, value=True, key=f"meta_{col_name}"):
+                    selected_metadata_cols.append(col_name)
+
+        st.divider()
+
+        uploaded_pdfs = st.file_uploader(
+            "2. Upload PDF Files", type=["pdf"], accept_multiple_files=True
+        )
+
+        st.divider()
+
+        st.markdown("#### ⚙️ Batch Splitting Options")
+        max_pages_per_file = st.number_input(
+            "Maximum Target Pages Per PDF File:",
+            min_value=1,
+            max_value=10000,
+            value=50,
+            step=5,
+            help="To fit multiple stores into one PDF, set this equal to or higher than their combined total pages.",
+        )
+
+        st.divider()
+
+        if st.button("Generate Master PDF(s)", type="primary"):
+            if not uploaded_pdfs:
+                st.error("Please upload the target PDF files.")
+            else:
+                with st.spinner(
+                    "Analyzing document sizes and organizing batches..."
+                ):
+                    pdf_dict = {
+                        pdf_file.name.lower(): pdf_file
+                        for pdf_file in uploaded_pdfs
                     }
+                    excel_basename = os.path.splitext(uploaded_excel.name)[0]
 
-                    content_page_count = 0
-                    valid_files_to_add = []
-                    detected_width = 612
-                    detected_height = 792
+                    if not file_columns:
+                        file_columns = [
+                            c
+                            for c in all_columns
+                            if c not in selected_metadata_cols
+                        ]
 
-                    for file_name in file_columns:
-                        qty_value = row[file_name]
+                    store_data_list = []
+                    max_single_store_pages = 0
+                    grand_total_pages = 0
 
-                        if pd.notna(qty_value):
-                            try:
-                                qty = int(qty_value)
-                            except ValueError:
-                                continue
-
-                            if qty > 0:
-                                pdf_key = str(file_name).strip().lower()
-                                if not pdf_key.endswith(".pdf"):
-                                    pdf_key += ".pdf"
-
-                                if pdf_key in pdf_dict:
-                                    pdf_file_obj = pdf_dict[pdf_key]
-                                    pdf_file_obj.seek(0)
-                                    reader = PdfReader(pdf_file_obj)
-
-                                    if reader.pages:
-                                        first_page = reader.pages[0]
-                                        detected_width = float(
-                                            first_page.mediabox.width
-                                        )
-                                        detected_height = float(
-                                            first_page.mediabox.height
-                                        )
-
-                                    pages_in_file = len(reader.pages)
-                                    content_page_count += pages_in_file * qty
-                                    valid_files_to_add.append(
-                                        (pdf_file_obj, qty)
-                                    )
-                                else:
-                                    st.warning(
-                                        f"File '{pdf_key}' referenced in sheet was not uploaded."
-                                    )
-
-                    # 1 Header Page + PDF Content Pages
-                    total_store_pages = 1 + content_page_count
-                    grand_total_pages += total_store_pages
-
-                    if total_store_pages > max_single_store_pages:
-                        max_single_store_pages = total_store_pages
-
-                    store_data_list.append(
-                        {
-                            "metadata": metadata_dict,
-                            "total_pages": total_store_pages,
-                            "files": valid_files_to_add,
-                            "width": detected_width,
-                            "height": detected_height,
+                    for index, row in df_control.iterrows():
+                        metadata_dict = {
+                            col: row[col]
+                            for col in selected_metadata_cols
+                            if col in row
                         }
-                    )
 
-                st.info(
-                    f"📊 **Total pages across all stores:** {grand_total_pages} pages "
-                    f"(Largest single store requires {max_single_store_pages} pages)."
-                )
+                        content_page_count = 0
+                        valid_files_to_add = []
+                        detected_width = 612
+                        detected_height = 792
 
-                # Adjust threshold if user limit is less than a single store
-                if max_pages_per_file < max_single_store_pages:
-                    st.warning(
-                        f"⚠️ **Limit adjusted:** The largest store needs **{max_single_store_pages} pages**. "
-                        f"The limit was raised to {max_single_store_pages} to keep each store complete."
-                    )
-                    effective_max = max(max_pages_per_file, max_single_store_pages)
-                else:
-                    effective_max = max_pages_per_file
+                        for file_name in file_columns:
+                            qty_value = row[file_name]
 
-                # --- PHASE 2: Group stores into batches ---
-                batches = []
-                current_batch = []
-                current_batch_page_count = 0
+                            if pd.notna(qty_value):
+                                try:
+                                    qty = int(qty_value)
+                                except ValueError:
+                                    continue
 
-                for store in store_data_list:
-                    if (
-                        current_batch_page_count + store["total_pages"]
-                        > effective_max
-                        and current_batch
-                    ):
-                        batches.append(current_batch)
-                        current_batch = []
-                        current_batch_page_count = 0
+                                if qty > 0:
+                                    pdf_key = str(file_name).strip().lower()
+                                    if not pdf_key.endswith(".pdf"):
+                                        pdf_key += ".pdf"
 
-                    current_batch.append(store)
-                    current_batch_page_count += store["total_pages"]
+                                    if pdf_key in pdf_dict:
+                                        pdf_file_obj = pdf_dict[pdf_key]
+                                        pdf_file_obj.seek(0)
+                                        reader = PdfReader(pdf_file_obj)
 
-                if current_batch:
-                    batches.append(current_batch)
+                                        if reader.pages:
+                                            first_page = reader.pages[0]
+                                            detected_width = float(
+                                                first_page.mediabox.width
+                                            )
+                                            detected_height = float(
+                                                first_page.mediabox.height
+                                            )
 
-                total_batches = len(batches)
+                                        pages_in_file = len(reader.pages)
+                                        content_page_count += (
+                                            pages_in_file * qty
+                                        )
+                                        valid_files_to_add.append(
+                                            (pdf_file_obj, qty)
+                                        )
+                                    else:
+                                        st.warning(
+                                            f"File '{pdf_key}' referenced in sheet was not uploaded."
+                                        )
 
-                # --- PHASE 3: Build PDF files ---
-                generated_files = []
+                        total_store_pages = 1 + content_page_count
+                        grand_total_pages += total_store_pages
 
-                for batch_idx, batch_stores in enumerate(batches, start=1):
-                    pdf_writer = PdfWriter()
+                        if total_store_pages > max_single_store_pages:
+                            max_single_store_pages = total_store_pages
 
-                    for store in batch_stores:
-                        header_pdf = create_header_pdf(
-                            store["metadata"],
-                            store["total_pages"],
-                            page_width=store["width"],
-                            page_height=store["height"],
+                        store_data_list.append(
+                            {
+                                "metadata": metadata_dict,
+                                "total_pages": total_store_pages,
+                                "files": valid_files_to_add,
+                                "width": detected_width,
+                                "height": detected_height,
+                            }
                         )
-                        pdf_writer.add_page(header_pdf.pages[0])
 
-                        for pdf_file_obj, qty in store["files"]:
-                            pdf_file_obj.seek(0)
-                            reader = PdfReader(pdf_file_obj)
-                            for _ in range(qty):
-                                for page in reader.pages:
-                                    pdf_writer.add_page(page)
-
-                    buf = io.BytesIO()
-                    pdf_writer.write(buf)
-                    buf.seek(0)
-
-                    batch_filename = f"{excel_basename}_Consolidated_Batch_{batch_idx}_of_{total_batches}.pdf"
-                    generated_files.append((batch_filename, buf.getvalue()))
-
-                st.success(
-                    f"Processing complete! Generated {total_batches} batch file(s)."
-                )
-
-                # --- PHASE 4: Download buttons ---
-                if total_batches == 1:
-                    filename, file_bytes = generated_files[0]
-                    st.download_button(
-                        label=f"⬇️ Download {filename}",
-                        data=file_bytes,
-                        file_name=filename,
-                        mime="application/pdf",
+                    st.info(
+                        f"📊 **Total pages across all stores:** {grand_total_pages} pages "
+                        f"(Largest single store requires {max_single_store_pages} pages)."
                     )
-                else:
-                    zip_buffer = io.BytesIO()
-                    with zipfile.ZipFile(
-                        zip_buffer, "w", zipfile.ZIP_DEFLATED
-                    ) as zip_file:
-                        for fname, fbytes in generated_files:
-                            zip_file.writestr(fname, fbytes)
 
-                    zip_buffer.seek(0)
-                    zip_filename = f"{excel_basename}_All_Batches.zip"
+                    if max_pages_per_file < max_single_store_pages:
+                        st.warning(
+                            f"⚠️ **Limit adjusted:** The largest store needs **{max_single_store_pages} pages**. "
+                            f"The limit was raised to {max_single_store_pages} to keep each store complete."
+                        )
+                        effective_max = max(
+                            max_pages_per_file, max_single_store_pages
+                        )
+                    else:
+                        effective_max = max_pages_per_file
 
-                    st.download_button(
-                        label=f"⬇️ Download All {total_batches} Batches (ZIP Archive)",
-                        data=zip_buffer,
-                        file_name=zip_filename,
-                        mime="application/zip",
+                    batches = []
+                    current_batch = []
+                    current_batch_page_count = 0
+
+                    for store in store_data_list:
+                        if (
+                            current_batch_page_count + store["total_pages"]
+                            > effective_max
+                            and current_batch
+                        ):
+                            batches.append(current_batch)
+                            current_batch = []
+                            current_batch_page_count = 0
+
+                        current_batch.append(store)
+                        current_batch_page_count += store["total_pages"]
+
+                    if current_batch:
+                        batches.append(current_batch)
+
+                    total_batches = len(batches)
+                    generated_files = []
+
+                    for batch_idx, batch_stores in enumerate(
+                        batches, start=1
+                    ):
+                        pdf_writer = PdfWriter()
+
+                        for store in batch_stores:
+                            header_pdf = create_header_pdf(
+                                store["metadata"],
+                                store["total_pages"],
+                                page_width=store["width"],
+                                page_height=store["height"],
+                            )
+                            pdf_writer.add_page(header_pdf.pages[0])
+
+                            for pdf_file_obj, qty in store["files"]:
+                                pdf_file_obj.seek(0)
+                                reader = PdfReader(pdf_file_obj)
+                                for _ in range(qty):
+                                    for page in reader.pages:
+                                        pdf_writer.add_page(page)
+
+                        buf = io.BytesIO()
+                        pdf_writer.write(buf)
+                        buf.seek(0)
+
+                        batch_filename = f"{excel_basename}_Consolidated_Batch_{batch_idx}_of_{total_batches}.pdf"
+                        generated_files.append((batch_filename, buf.getvalue()))
+
+                    st.success(
+                        f"Processing complete! Generated {total_batches} batch file(s)."
                     )
+
+                    if total_batches == 1:
+                        filename, file_bytes = generated_files[0]
+                        st.download_button(
+                            label=f"⬇️ Download {filename}",
+                            data=file_bytes,
+                            file_name=filename,
+                            mime="application/pdf",
+                        )
+                    else:
+                        zip_buffer = io.BytesIO()
+                        with zipfile.ZipFile(
+                            zip_buffer, "w", zipfile.ZIP_DEFLATED
+                        ) as zip_file:
+                            for fname, fbytes in generated_files:
+                                zip_file.writestr(fname, fbytes)
+
+                        zip_buffer.seek(0)
+                        zip_filename = f"{excel_basename}_All_Batches.zip"
+
+                        st.download_button(
+                            label=f"⬇️ Download All {total_batches} Batches (ZIP Archive)",
+                            data=zip_buffer,
+                            file_name=zip_filename,
+                            mime="application/zip",
+                        )
+
+# ---------------------------------------------------------
+# PAGE 4: GENERAL
+# ---------------------------------------------------------
+elif st.session_state.current_page == "general":
+    st.subheader("⚙️ General Settings & Tools")
+    st.write("General PDF utilities, preferences, and application information.")
+    st.info("Feature placeholder: Configure global PDF defaults or settings.")
