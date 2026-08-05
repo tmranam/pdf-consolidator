@@ -58,29 +58,43 @@ def create_header_pdf(
 
 
 # Helper function for Standard Batch Header generation
-def create_batch_header_file(job_no, description, total_batches, auto_number=True):
+def create_batch_header_file(
+    job_no, description, total_batches, auto_number=True
+):
     packet = io.BytesIO()
-    can = canvas.Canvas(packet, pagesize=A4)
-    page_width, page_height = A4
+    can = canvas.Canvas(packet, pagesize=letter)
+    page_width, page_height = letter
+
     center_x = page_width / 2.0
 
+    # Draw pages
     for i in range(1, total_batches + 1):
-        # Job Number (Promoted to Header Size: Font 45)
-        can.setFont("Helvetica-Bold", 36)
-        can.drawCentredString(center_x, page_height - 120, f"JOB NO: {job_no}")
-        
-        # Description
-        can.setFont("Helvetica", 36)
-        can.drawCentredString(center_x, page_height - 180, f" {description}")
+        # 1. Job No. (Large font at the top)
+        can.setFont("Helvetica-Bold", 70)
+        can.drawCentredString(center_x, page_height - 110, str(job_no))
 
-        # Batch Numbering
-        can.setFont("Helvetica-Bold", 48)
+        # 2. Description (Under Job No.)
+        can.setFont("Helvetica-Bold", 32)
+        can.drawCentredString(center_x, page_height - 170, str(description))
+
+        # 3. Batch Numbering on 3 separate lines
+        can.setFont("Helvetica-Bold", 90)
+
+        # Line 1: Current Batch Number (e.g. 1)
+        can.drawCentredString(center_x, page_height - 290, str(i))
+
+        # Line 2: OF
+        can.setFont("Helvetica-Bold", 50)
+        can.drawCentredString(center_x, page_height - 370, "OF")
+
+        # Line 3: Total Batches (e.g. 12 or ______ )
+        can.setFont("Helvetica-Bold", 90)
         if auto_number:
-            count_str = f"BATCH {i} OF {total_batches}"
+            total_str = str(total_batches)
         else:
-            count_str = f"BATCH {i} OF ______"
-            
-        can.drawCentredString(center_x, page_height / 2.0, count_str)
+            total_str = "______"
+
+        can.drawCentredString(center_x, page_height - 470, total_str)
 
         can.showPage()
 
