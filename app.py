@@ -57,6 +57,41 @@ def create_header_pdf(
     return PdfReader(packet)
 
 
+# Helper function for Standard Batch Header generation
+def create_batch_header_file(job_no, description, total_batches, auto_number=True):
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=A4)
+    page_width, page_height = A4
+    center_x = page_width / 2.0
+
+    for i in range(1, total_batches + 1):
+        # Header Title
+        can.setFont("Helvetica-Bold", 36)
+        can.drawCentredString(center_x, page_height - 100, "BATCH HEADER")
+
+        # Job Details
+        can.setFont("Helvetica-Bold", 20)
+        can.drawCentredString(center_x, page_height - 180, f"JOB NO: {job_no}")
+        
+        can.setFont("Helvetica", 16)
+        can.drawCentredString(center_x, page_height - 220, f"Description: {description}")
+
+        # Batch Numbering
+        can.setFont("Helvetica-Bold", 48)
+        if auto_number:
+            count_str = f"BATCH {i} OF {total_batches}"
+        else:
+            count_str = f"BATCH {i} OF ______"
+            
+        can.drawCentredString(center_x, page_height / 2.0, count_str)
+
+        can.showPage()
+
+    can.save()
+    packet.seek(0)
+    return packet
+
+
 # Helper function for Outside Work Label generator matching image format exactly
 def create_outside_work_label_file(
     supplier,
@@ -768,49 +803,6 @@ elif st.session_state.current_page == "batches_and_labels":
                         file_name=out_filename,
                         mime="application/pdf",
                     )
-        else:
-            col1, col2 = st.columns(2)
-            with col1:
-                job_no = st.text_input("Job No.:", value="054520")
-            with col2:
-                description = st.text_input(
-                    "Description:", value="Fragrance Wk5-6"
-                )
-
-            total_batches = st.number_input(
-                "Total Batches (Number of Pages):",
-                min_value=1,
-                max_value=1000,
-                value=20,
-                step=1,
-            )
-
-            auto_number = st.checkbox(
-                "Include Total Count (e.g. '1 OF 20')?",
-                value=True,
-                help="If checked, numbers each page as '1 OF 20', '2 OF 20'. If unchecked, prints '1 OF ______' for manual entry.",
-            )
-
-            st.divider()
-
-            if st.button("Generate Batch Headers PDF", type="primary"):
-                with st.spinner("Generating batch header sheets..."):
-                    pdf_bytes = create_batch_header_file(
-                        job_no=job_no,
-                        description=description,
-                        total_batches=int(total_batches),
-                        auto_number=auto_number,
-                    )
-
-                    out_filename = f"{job_no}_Batch_Headers.pdf"
-
-                    st.success("Batch headers generated successfully!")
-                    st.download_button(
-                        label=f"⬇️ Download {out_filename}",
-                        data=pdf_bytes,
-                        file_name=out_filename,
-                        mime="application/pdf",
-                    )
 
     # --- SUBTAB 2: PRINT LABELS ---
     elif st.session_state.batches_subtab == "print_labels":
@@ -879,141 +871,62 @@ elif st.session_state.current_page == "batches_and_labels":
 
         st.divider()
 
-        st.markdown("#### 2. Label Text Configuration")
+        st.markdown("#### 2. Label Content & Quantity")
         num_lines = st.number_input(
-            "Number of Text Lines per Label:",
-            min_value=1,
-            max_value=10,
-            value=3,
-            step=1,
+            "Number of Text Lines per Label:", min_value=1, max_value=5, value=2, step=1
         )
 
         lines_config = []
-        for line_idx in range(int(num_lines)):
-            st.markdown(f"**Line {line_idx + 1}:**")
-            col_txt, col_fs, col_bld = st.columns([3, 1, 1])
+        for i in range(int(num_lines)):
+            l_col1, l_col2, l_col3 = st.columns([3, 1, 1])
+            with l_col1:
+                text = st.text_input(f"Line {i+1} Text:", value=f"Sample Text {i+1}", key=f"label_txt_{i}")
+            with l_col2:
+                font_size = st.number_input(f"Font Size:", min_value=6, max_value=48, value=12, key=f"label_size_{i}")
+            with l_col3:
+                bold = st.checkbox("Bold", value=True, key=f"label_bold_{i}")
+            
+            lines_config.append({"text": text, "font_size": font_size, "bold": bold})
 
-            with col_txt:
-                line_text = st.text_input(
-                    "Text", value=f"Line {line_idx + 1} Content", key=f"lbl_txt_{line_idx}"
-                )
-            with col_fs:
-                font_size = st.number_input(
-                    "Font Size",
-                    min_value=6,
-                    max_value=72,
-                    value=12,
-                    step=1,
-                    key=f"lbl_fs_{line_idx}",
-                )
-            with col_bld:
-                is_bold = st.checkbox(
-                    "Bold", value=False, key=f"lbl_bld_{line_idx}"
-                )
-
-            lines_config.append(
-                {"text": line_text, "font_size": int(font_size), "bold": is_bold}
-            )
-
-        st.divider()
-
-        st.markdown("#### 3. Batch Quantity & Numbering")
-        col_qty1, col_qty2 = st.columns(2)
-        with col_qty1:
-            total_labels = st.number_input(
-                "Total Quantity of Labels to Print:",
-                min_value=1,
-                max_value=10000,
-                value=14,
-                step=1,
-            )
-        with col_qty2:
-            include_numbering = st.checkbox(
-                "Append '1 of N' Numbering Line?",
-                value=True,
-                help="Adds a bottom line displaying '1 of 14', '2 of 14', etc., on each label.",
-            )
+        total_labels = st.number_input(
+            "Total Labels to Print:", min_value=1, max_value=10000, value=14, step=1
+        )
+        include_numbering = st.checkbox(
+            "Include Auto-Numbering (e.g., '1 of 14') on Label?", value=True
+        )
 
         st.divider()
 
         if st.button("Generate Imposed Labels PDF", type="primary"):
-            with st.spinner("Generating and imposing labels on A4..."):
-                mm_to_pt = 2.83464567
-                label_w_pt = label_w_mm * mm_to_pt
-                label_h_pt = label_h_mm * mm_to_pt
-                gutter_x_pt = gutter_x_mm * mm_to_pt
-                gutter_y_pt = gutter_y_mm * mm_to_pt
-                margin_x_pt = margin_x_mm * mm_to_pt
-                margin_y_pt = margin_y_mm * mm_to_pt
-
-                labels_pdf_io = create_labels_pdf(
+            with st.spinner("Generating labels layout..."):
+                # Convert mm to ReportLab points (1 mm = ~2.83465 pt)
+                mm_to_pt = 2.83465
+                
+                pdf_bytes = create_labels_pdf(
                     rows=int(rows),
                     cols=int(cols),
-                    label_w_pt=label_w_pt,
-                    label_h_pt=label_h_pt,
-                    gutter_x_pt=gutter_x_pt,
-                    gutter_y_pt=gutter_y_pt,
-                    margin_x_pt=margin_x_pt,
-                    margin_y_pt=margin_y_pt,
+                    label_w_pt=label_w_mm * mm_to_pt,
+                    label_h_pt=label_h_mm * mm_to_pt,
+                    gutter_x_pt=gutter_x_mm * mm_to_pt,
+                    gutter_y_pt=gutter_y_mm * mm_to_pt,
+                    margin_x_pt=margin_x_mm * mm_to_pt,
+                    margin_y_pt=margin_y_mm * mm_to_pt,
                     lines_config=lines_config,
                     total_labels=int(total_labels),
                     include_numbering=include_numbering,
                 )
 
-                out_filename = f"Imposed_Labels_{total_labels}_Items.pdf"
-
-                st.success("Labels PDF generated successfully!")
+                st.success("Labels generated successfully!")
                 st.download_button(
-                    label=f"⬇️ Download {out_filename}",
-                    data=labels_pdf_io,
-                    file_name=out_filename,
+                    label="⬇️ Download Imposed Labels PDF",
+                    data=pdf_bytes,
+                    file_name="Imposed_Labels.pdf",
                     mime="application/pdf",
                 )
 
 # ---------------------------------------------------------
-# PAGE 5: GENERAL / UTILITIES
+# PAGE 5: GENERAL / OTHER TOOLS
 # ---------------------------------------------------------
 elif st.session_state.current_page == "general":
-    st.subheader("⚙️ General Settings & Diagnostics")
-    st.write(
-        "Manage application state, view active session data, and inspect quick PDF properties."
-    )
-
-    st.markdown("### 📄 Quick PDF Inspector")
-    inspect_file = st.file_uploader(
-        "Upload a PDF to inspect metadata and dimensions:", type=["pdf"]
-    )
-
-    if inspect_file:
-        try:
-            reader = PdfReader(inspect_file)
-            total_pages = len(reader.pages)
-            st.write(f"**Total Pages:** {total_pages}")
-
-            if total_pages > 0:
-                first_page = reader.pages[0]
-                width = float(first_page.mediabox.width)
-                height = float(first_page.mediabox.height)
-
-                col_w, col_h = st.columns(2)
-                col_w.metric("Width (pt)", f"{width:.2f}")
-                col_h.metric("Height (pt)", f"{height:.2f}")
-
-                if reader.metadata:
-                    st.markdown("**Document Metadata:**")
-                    metadata_clean = {
-                        k: str(v)
-                        for k, v in reader.metadata.items()
-                        if v is not None
-                    }
-                    st.json(metadata_clean)
-        except Exception as e:
-            st.error(f"Error reading PDF file: {e}")
-
-    st.divider()
-
-    st.markdown("### 🔄 Session Management")
-    if st.button("Reset Session State"):
-        st.session_state.clear()
-        st.session_state.current_page = "batch_consolidator"
-        st.rerun()
+    st.subheader("⚙️ General Settings & Tools")
+    st.write("Additional utility tools and general dashboard configuration.")
