@@ -57,44 +57,7 @@ def create_header_pdf(
     return PdfReader(packet)
 
 
-# Helper function for Standard Batch Headers generator
-def create_batch_header_file(
-    job_no, description, total_batches, auto_number=True
-):
-    packet = io.BytesIO()
-    can = canvas.Canvas(packet, pagesize=letter)
-    page_width, page_height = letter
-
-    center_x = page_width / 2.0
-
-    for i in range(1, total_batches + 1):
-        # 1. Job No.
-        can.setFont("Helvetica-Bold", 70)
-        can.drawCentredString(center_x, page_height - 110, str(job_no))
-
-        # 2. Description
-        can.setFont("Helvetica-Bold", 32)
-        can.drawCentredString(center_x, page_height - 170, str(description))
-
-        # 3. Batch Numbering
-        can.setFont("Helvetica-Bold", 90)
-        can.drawCentredString(center_x, page_height - 290, str(i))
-
-        can.setFont("Helvetica-Bold", 50)
-        can.drawCentredString(center_x, page_height - 370, "OF")
-
-        can.setFont("Helvetica-Bold", 90)
-        total_str = str(total_batches) if auto_number else "______"
-        can.drawCentredString(center_x, page_height - 470, total_str)
-
-        can.showPage()
-
-    can.save()
-    packet.seek(0)
-    return packet
-
-
-# Helper function for Outside Work Label generator (Blue Background + White Text)
+# Helper function for Outside Work Label generator matching image format exactly
 def create_outside_work_label_file(
     supplier,
     job_no,
@@ -108,35 +71,70 @@ def create_outside_work_label_file(
     can = canvas.Canvas(packet, pagesize=A4)
     page_width, page_height = A4
 
-    margin = 40
-    bg_blue = HexColor("#002F6C")
-    text_white = HexColor("#FFFFFF")
+    # Theme colors extracted from reference design
+    cyan_bg = HexColor("#00AEEF")
+    dark_frame = HexColor("#1A1A1A")
+    text_dark = HexColor("#1A1A1A")
 
     for i in range(1, total_pallets + 1):
-        # 1. Fill Entire Background with Dark Blue
-        can.setFillColor(bg_blue)
+        # 1. Fill Page Background (Bright Cyan/Blue)
+        can.setFillColor(cyan_bg)
         can.rect(0, 0, page_width, page_height, fill=1, stroke=0)
 
-        # 2. Top Header Section: Address
-        can.setFillColor(text_white)
+        # 2. Outer Chamfered Border Frame
+        margin_x = 35
+        margin_y = 35
+        frame_w = page_width - (margin_x * 2)
+        frame_h = page_height - (margin_y * 2)
+        corner_cut = 25  # Corner angle cutout at the top
+
+        path = can.beginPath()
+        path.moveTo(margin_x + corner_cut, page_height - margin_y)
+        path.lineTo(
+            page_width - margin_x - corner_cut, page_height - margin_y
+        )
+        path.lineTo(page_width - margin_x, page_height - margin_y - corner_cut)
+        path.lineTo(page_width - margin_x, margin_y)
+        path.lineTo(margin_x, margin_y)
+        path.lineTo(margin_x, page_height - margin_y - corner_cut)
+        path.close()
+
+        can.setStrokeColor(dark_frame)
+        can.setLineWidth(5)
+        can.drawPath(path, fill=0, stroke=1)
+
+        # 3. Top Section: From Address & Logo
+        can.setFillColor(text_dark)
         can.setFont("Helvetica-Bold", 11)
-        can.drawString(margin, page_height - 45, "From:")
-        can.setFont("Helvetica-Bold", 13)
-        can.drawString(margin, page_height - 62, "IVE Print")
-        can.setFont("Helvetica", 10)
-        can.drawString(margin, page_height - 76, "24-36 Beyer Rd, Braeside")
-        can.drawString(margin, page_height - 89, "Victoria 3195")
+        can.drawString(margin_x + 20, page_height - 75, "From:")
+        can.setFont("Helvetica-Bold", 14)
+        can.drawString(margin_x + 20, page_height - 93, "IVE Print")
+        can.setFont("Helvetica", 11)
+        can.drawString(
+            margin_x + 20, page_height - 109, "24-36 Beyer Rd, Braeside"
+        )
+        can.drawString(margin_x + 20, page_height - 123, "Victoria 3195")
 
-        # Top Right Logo Text
-        can.setFont("Helvetica-Bold", 36)
-        can.drawRightString(page_width - margin, page_height - 75, "ive")
-
-        # Title Banner: OUTSIDE WORK
+        # Top Right "ive" logo
         can.setFont("Helvetica-Bold", 46)
-        can.drawCentredString(page_width / 2.0, page_height - 145, "OUTSIDE")
-        can.drawCentredString(page_width / 2.0, page_height - 192, "WORK")
+        can.drawRightString(
+            page_width - margin_x - 25, page_height - 105, "ive"
+        )
 
-        # Form Fields Configuration
+        # 4. Dark Block Banner: "OUTSIDE WORK"
+        banner_y = page_height - 350
+        banner_h = 190
+        can.setFillColor(dark_frame)
+        can.rect(
+            margin_x, banner_y, frame_w, banner_h, fill=1, stroke=0
+        )
+
+        can.setFillColor(HexColor("#FFFFFF"))
+        can.setFont("Helvetica-Bold", 54)
+        can.drawCentredString(page_width / 2.0, banner_y + 110, "OUTSIDE")
+        can.drawCentredString(page_width / 2.0, banner_y + 40, "WORK")
+
+        # 5. Form Fields with Dotted Baseline Guides
         fields = [
             ("Supplier:", supplier),
             ("Job No:", job_no),
@@ -145,38 +143,70 @@ def create_outside_work_label_file(
             ("Qty this pallet:", qty_this_pallet),
         ]
 
-        y = page_height - 240
-        line_gap = 62
+        y_start = banner_y - 45
+        line_gap = 42
 
-        for label, val in fields:
-            can.setFont("Helvetica-Bold", 15)
-            can.drawString(margin, y, label)
+        can.setFillColor(text_dark)
 
-            can.setFont("Helvetica-Bold", 26)
-            can.drawString(margin, y - 28, str(val) if val else "")
+        for idx, (label, val) in enumerate(fields):
+            curr_y = y_start - (idx * line_gap)
 
-            # White Underline Divider
-            can.setStrokeColor(text_white)
+            # Field Label
+            can.setFont("Helvetica", 16)
+            can.drawString(margin_x + 20, curr_y, label)
+
+            label_width = can.stringWidth(label, "Helvetica", 16)
+            dots_x_start = margin_x + 25 + label_width
+
+            # Render Form Entry Text
+            if val:
+                can.setFont("Helvetica-Bold", 20)
+                can.drawString(dots_x_start + 10, curr_y, str(val))
+
+            # Render Dotted Line Baseline
+            can.setStrokeColor(dark_frame)
             can.setLineWidth(1)
-            can.line(margin, y - 36, page_width - margin, y - 36)
+            can.setDash([1, 3], 0)  # Creates dotted line effect
+            can.line(
+                dots_x_start,
+                curr_y - 2,
+                page_width - margin_x - 20,
+                curr_y - 2,
+            )
 
-            y -= line_gap
+        # 6. Bottom Row: Pallet X of Y
+        y_pallet = y_start - (len(fields) * line_gap)
 
-        # Bottom Section: Pallet X of Y
-        y_pallet = y - 10
+        can.setFont("Helvetica", 16)
+        can.drawString(margin_x + 20, y_pallet, "Pallet:")
 
-        can.setFont("Helvetica-Bold", 22)
-        can.drawString(margin, y_pallet, "Pallet:")
+        # Draw Pallet Number
+        can.setFont("Helvetica-Bold", 20)
+        can.drawString(margin_x + 95, y_pallet, str(i))
 
-        can.setFont("Helvetica-Bold", 52)
-        can.drawString(margin + 85, y_pallet - 6, str(i))
+        # "of:" text
+        can.setFont("Helvetica", 16)
+        can.drawString(margin_x + 155, y_pallet, "of:")
 
-        can.setFont("Helvetica-Bold", 22)
-        can.drawString(margin + 185, y_pallet, "of:")
+        # Draw Total Pallets value
+        total_str = str(total_pallets) if auto_number_pallets else ""
+        if total_str:
+            can.setFont("Helvetica-Bold", 20)
+            can.drawString(margin_x + 195, y_pallet, total_str)
 
-        can.setFont("Helvetica-Bold", 52)
-        total_str = str(total_pallets) if auto_number_pallets else "______"
-        can.drawString(margin + 225, y_pallet - 6, total_str)
+        # Final Dotted Line across the bottom
+        can.setStrokeColor(dark_frame)
+        can.setLineWidth(1)
+        can.setDash([1, 3], 0)
+        can.line(
+            margin_x + 20,
+            y_pallet - 2,
+            page_width - margin_x - 20,
+            y_pallet - 2,
+        )
+
+        # Reset Dash Pattern for clean next page rendering
+        can.setDash([], 0)
 
         can.showPage()
 
