@@ -71,7 +71,7 @@ def create_batch_header_file(job_no, description, total_batches, auto_number=Tru
         
         # Description
         can.setFont("Helvetica", 16)
-        can.drawCentredString(center_x, page_height - 180, f"Description: {description}")
+        can.drawCentredString(center_x, page_height - 180, f" {description}")
 
         # Batch Numbering
         can.setFont("Helvetica-Bold", 48)
