@@ -130,7 +130,7 @@ def create_outside_work_label_file(
         )
 
         can.setFillColor(HexColor("#FFFFFF"))
-        can.setFont("Helvetica-Bold", 110)
+        can.setFont("Helvetica-Bold", 90)
         can.drawCentredString(page_width / 2.0, banner_y + 110, "OUTSIDE")
         can.drawCentredString(page_width / 2.0, banner_y + 40, "WORK")
 
