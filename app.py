@@ -65,12 +65,12 @@ def create_batch_header_file(job_no, description, total_batches, auto_number=Tru
     center_x = page_width / 2.0
 
     for i in range(1, total_batches + 1):
-        # Job Number (Promoted to Header Size: Font 36)
+        # Job Number (Promoted to Header Size: Font 45)
         can.setFont("Helvetica-Bold", 36)
         can.drawCentredString(center_x, page_height - 120, f"JOB NO: {job_no}")
         
         # Description
-        can.setFont("Helvetica", 16)
+        can.setFont("Helvetica", 36)
         can.drawCentredString(center_x, page_height - 180, f" {description}")
 
         # Batch Numbering
