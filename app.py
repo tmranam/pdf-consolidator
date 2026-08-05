@@ -768,6 +768,49 @@ elif st.session_state.current_page == "batches_and_labels":
                         file_name=out_filename,
                         mime="application/pdf",
                     )
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                job_no = st.text_input("Job No.:", value="054520")
+            with col2:
+                description = st.text_input(
+                    "Description:", value="Fragrance Wk5-6"
+                )
+
+            total_batches = st.number_input(
+                "Total Batches (Number of Pages):",
+                min_value=1,
+                max_value=1000,
+                value=20,
+                step=1,
+            )
+
+            auto_number = st.checkbox(
+                "Include Total Count (e.g. '1 OF 20')?",
+                value=True,
+                help="If checked, numbers each page as '1 OF 20', '2 OF 20'. If unchecked, prints '1 OF ______' for manual entry.",
+            )
+
+            st.divider()
+
+            if st.button("Generate Batch Headers PDF", type="primary"):
+                with st.spinner("Generating batch header sheets..."):
+                    pdf_bytes = create_batch_header_file(
+                        job_no=job_no,
+                        description=description,
+                        total_batches=int(total_batches),
+                        auto_number=auto_number,
+                    )
+
+                    out_filename = f"{job_no}_Batch_Headers.pdf"
+
+                    st.success("Batch headers generated successfully!")
+                    st.download_button(
+                        label=f"⬇️ Download {out_filename}",
+                        data=pdf_bytes,
+                        file_name=out_filename,
+                        mime="application/pdf",
+                    )
 
     # --- SUBTAB 2: PRINT LABELS ---
     elif st.session_state.batches_subtab == "print_labels":
