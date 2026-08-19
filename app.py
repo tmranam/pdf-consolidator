@@ -859,7 +859,7 @@ elif st.session_state.current_page == "batches_and_labels":
                         mime="application/pdf",
                     )
 
-    # --- SUBTAB 2: PRINT LABELS ---
+       # --- SUBTAB 2: PRINT LABELS ---
     elif st.session_state.batches_subtab == "print_labels":
         st.markdown("### 🖨️ Print Labels Generator")
         st.write(
@@ -926,7 +926,7 @@ elif st.session_state.current_page == "batches_and_labels":
 
         st.divider()
 
-        st.markdown("#### 2. Label Content & Quantity")
+        st.markdown("#### 2. Label Master Content & Quantity")
         num_lines = st.number_input(
             "Number of Text Lines per Label:",
             min_value=1,
@@ -935,55 +935,136 @@ elif st.session_state.current_page == "batches_and_labels":
             step=1,
         )
 
-        lines_config = []
+        # 1. Setup Master Baseline Configuration
+        master_lines = []
+        st.markdown("##### 🖋️ Configure Master Baseline Values")
         for i in range(int(num_lines)):
             l_col1, l_col2, l_col3 = st.columns([3, 1, 1])
             with l_col1:
-                text_val = st.text_input(
-                    f"Line {i+1} Text:",
+                m_text = st.text_input(
+                    f"Line {i+1} Master Text:",
                     value=f"Sample Text {i+1}",
-                    key=f"label_text_{i}",
+                    key=f"master_text_{i}",
                 )
             with l_col2:
-                font_sz = st.number_input(
-                    f"Line {i+1} Size:",
+                m_sz = st.number_input(
+                    f"Line {i+1} Master Size:",
                     min_value=6,
                     max_value=72,
                     value=12,
                     step=1,
-                    key=f"label_size_{i}",
+                    key=f"master_size_{i}",
                 )
             with l_col3:
-                is_bold = st.checkbox(
-                    "Bold", value=(i == 0), key=f"label_bold_{i}"
+                m_bld = st.checkbox(
+                    "Bold", value=(i == 0), key=f"master_bold_{i}"
                 )
-
-            lines_config.append(
-                {"text": text_val, "font_size": font_sz, "bold": is_bold}
-            )
+            master_lines.append({"text": m_text, "font_size": m_sz, "bold": m_bld})
 
         st.divider()
+        st.markdown("#### 3. Batch Break Segment Control Matrix")
+        
+        num_breaks = st.number_input(
+            "Number of Breaks / Batch Segments:",
+            min_value=1,
+            max_value=100,
+            value=1,
+            step=1,
+        )
 
-        col_qty1, col_qty2 = st.columns(2)
-        with col_qty1:
-            total_labels = st.number_input(
-                "Total Labels to Print:",
-                min_value=1,
-                max_value=10000,
-                value=14,
-                step=1,
-            )
-        with col_qty2:
-            include_num = st.checkbox(
-                "Include Sequential Label Count (e.g. '1 of 14')?",
-                value=True,
-            )
+        breaks_configs = []
+        running_label_counter = 1
+
+        # 2. Iterate and render flexible card modules per batch break group
+        for b in range(int(num_breaks)):
+            st.markdown(f"---")
+            st.markdown(f"##### 📦 Batch Segment Group Block #{b+1}")
+            
+            col_b1, col_b2, col_b3 = st.columns(3)
+            with col_b1:
+                b_labels_count = st.number_input(
+                    f"Total Labels for Batch #{b+1}:",
+                    min_value=1, value=14, step=1, key=f"b_count_{b}"
+                )
+            with col_b2:
+                include_num = st.checkbox(
+                    "Include Sequence Counter?", value=True, key=f"b_inc_num_{b}"
+                )
+            with col_b3:
+                r_num_mode = st.radio(
+                    f"Sequence Slicing Logic:",
+                    ["Continue from previous batch", "Restart from new number"],
+                    key=f"b_mode_{b}"
+                )
+
+            # Explicit sequence constraints allocation
+            start_num = running_label_counter
+            end_num = running_label_counter + b_labels_count - 1
+            
+            if r_num_mode == "Restart from new number":
+                nc1, nc2 = st.columns(2)
+                with nc1:
+                    start_num = st.number_input(
+                        "Start Number Overwrite:", min_value=1, value=1, key=f"b_start_{b}"
+                    )
+                with nc2:
+                    end_num = st.number_input(
+                        "End Number (Denominator limit):", min_value=1, value=14, key=f"b_end_{b}"
+                    )
+
+            b_final_lines = []
+            st.markdown(f"⚙️ **Line Content Overrides for Batch #{b+1}:**")
+            
+            for i in range(int(num_lines)):
+                cc1, cc2 = st.columns([2, 3])
+                with cc1:
+                    stay_same = st.checkbox(
+                        "Stay Same / Inherit", value=True, key=f"b_same_{b}_{i}"
+                    )
+                with cc2:
+                    if stay_same:
+                        st.caption(f"Inherited: *\"{master_lines[i]['text']}\"*")
+                        line_txt = master_lines[i]["text"]
+                    else:
+                        line_txt = st.text_input(
+                            f"Modify Line {i+1} Text:",
+                            value=master_lines[i]["text"],
+                            key=f"b_text_override_{b}_{i}"
+                        )
+                
+                b_final_lines.append({
+                    "text": line_txt,
+                    "font_size": master_lines[i]["font_size"],
+                    "bold": master_lines[i]["bold"]
+                })
+
+            breaks_configs.append({
+                "count": int(b_labels_count),
+                "include_numbering": include_num,
+                "num_mode": r_num_mode,
+                "start_num": int(start_num),
+                "end_num": int(end_num),
+                "lines": b_final_lines,
+                "total_labels_global": int(b_labels_count)
+            })
+            
+            # Save sequential tracker step updates
+            running_label_counter += int(b_labels_count)
+
+        st.divider()
 
         if st.button("Generate Imposed Labels PDF", type="primary"):
             with st.spinner("Generating labels layout..."):
                 mm_to_pt = 2.83465
+                
+                # Align denominators for the sequential continuous blocks
+                total_global_sum = sum(item["count"] for item in breaks_configs)
+                for item in breaks_configs:
+                    if item["num_mode"] == "Continue from previous batch":
+                        item["total_labels_global"] = total_global_sum
 
-                pdf_bytes = create_labels_pdf(
+                # Trigger new multi-segment backend renderer function signature
+                pdf_bytes = create_labels_pdf_upgraded(
                     rows=int(rows),
                     cols=int(cols),
                     label_w_pt=label_w_mm * mm_to_pt,
@@ -992,9 +1073,7 @@ elif st.session_state.current_page == "batches_and_labels":
                     gutter_y_pt=gutter_y_mm * mm_to_pt,
                     margin_x_pt=margin_x_mm * mm_to_pt,
                     margin_y_pt=margin_y_mm * mm_to_pt,
-                    lines_config=lines_config,
-                    total_labels=int(total_labels),
-                    include_numbering=include_num,
+                    breaks_configs=breaks_configs,
                 )
 
                 out_filename = "Imposed_Labels_Output.pdf"
