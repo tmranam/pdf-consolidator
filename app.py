@@ -294,9 +294,9 @@ def create_labels_pdf(
     margin_x_pt,
     margin_y_pt,
     lines_config,
-    breaks_configs=None,
     total_labels,
     include_numbering,
+    breaks_configs=None
 ):
     packet = io.BytesIO()
     can = canvas.Canvas(packet, pagesize=A4)
