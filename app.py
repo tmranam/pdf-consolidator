@@ -1050,11 +1050,11 @@ elif st.session_state.current_page == "batches_and_labels":
             })
             
             # Save sequential tracker step updates
+                        # Save sequential tracker step updates
             running_label_counter += int(b_labels_count)
 
-        st.divider()
+ st.divider()
 
-                       # Ensure there are exactly 8 spaces before 'if'
  col_qty1, col_qty2 = st.columns(2)
  with col_qty1:
   total_labels = st.number_input(
