@@ -1055,7 +1055,7 @@ elif st.session_state.current_page == "batches_and_labels":
         st.divider()
 
                        # Ensure there are exactly 8 spaces before 'if'
-        if st.button("Generate Imposed Labels PDF", type="primary"):
+               if st.button("Generate Imposed Labels PDF", type="primary"):
             with st.spinner("Generating labels layout..."):
                 mm_to_pt = 2.83465
                 
@@ -1065,7 +1065,13 @@ elif st.session_state.current_page == "batches_and_labels":
                     if item["num_mode"] == "Continue from previous batch":
                         item["total_labels_global"] = total_global_sum
 
-                # Trigger backend renderer
+                # Fetch lines_config if it exists, otherwise fall back to empty list safely
+                active_lines = lines_config if 'lines_config' in locals() else []
+                
+                # Fetch checkbox state safely, fallback to True if missing
+                active_num = include_num if 'include_num' in locals() else True
+
+                # Trigger backend renderer with exact variable alignments
                 pdf_bytes = create_labels_pdf(
                     rows=int(rows),
                     cols=int(cols),
@@ -1075,9 +1081,9 @@ elif st.session_state.current_page == "batches_and_labels":
                     gutter_y_pt=gutter_y_mm * mm_to_pt,
                     margin_x_pt=margin_x_mm * mm_to_pt,
                     margin_y_pt=margin_y_mm * mm_to_pt,
-                    lines_config=lines_config,
-                    total_labels=total_global_sum,
-                    include_numbering=include_numbering,
+                    lines_config=active_lines,
+                    total_labels=int(total_global_sum),
+                    include_numbering=active_num,
                     breaks_configs=breaks_configs,
                 )
 
@@ -1090,6 +1096,7 @@ elif st.session_state.current_page == "batches_and_labels":
                     file_name=out_filename,
                     mime="application/pdf",
                 )
+
 
 
 
