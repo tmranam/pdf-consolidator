@@ -1054,7 +1054,8 @@ elif st.session_state.current_page == "batches_and_labels":
 
         st.divider()
 
-                if st.button("Generate Imposed Labels PDF", type="primary"):
+                       # Ensure there are exactly 8 spaces before 'if'
+        if st.button("Generate Imposed Labels PDF", type="primary"):
             with st.spinner("Generating labels layout..."):
                 mm_to_pt = 2.83465
                 
@@ -1064,7 +1065,7 @@ elif st.session_state.current_page == "batches_and_labels":
                     if item["num_mode"] == "Continue from previous batch":
                         item["total_labels_global"] = total_global_sum
 
-                # Trigger new multi-segment backend renderer function signature
+                # Trigger backend renderer
                 pdf_bytes = create_labels_pdf(
                     rows=int(rows),
                     cols=int(cols),
@@ -1089,6 +1090,7 @@ elif st.session_state.current_page == "batches_and_labels":
                     file_name=out_filename,
                     mime="application/pdf",
                 )
+
 
 
 
