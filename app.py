@@ -284,6 +284,10 @@ def create_outside_work_label_file(
 
 
 # Helper function for Print Labels Imposition
+import io
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+
 def create_labels_pdf(
     rows,
     cols,
@@ -301,48 +305,80 @@ def create_labels_pdf(
     packet = io.BytesIO()
     can = canvas.Canvas(packet, pagesize=A4)
     a4_w, a4_h = A4
-
-    current_label = 1
-
-    while current_label <= total_labels:
+    
+    # 1. Standard Fallback to single batch mode if breaks_configs is missing
+    if not breaks_configs:
+        breaks_configs = [{
+            "count": total_labels,
+            "include_numbering": include_numbering,
+            "num_mode": "Restart from new number",
+            "start_num": 1,
+            "end_num": total_labels,
+            "lines": lines_config,
+            "total_labels_global": total_labels
+        }]
+    
+    # 2. Flatten all labels into a linear sequence across batches
+    all_computed_labels = []
+    for batch in breaks_configs:
+        b_count = batch.get("count", 0)
+        b_lines = batch.get("lines", [])
+        b_inc_num = batch.get("include_numbering", True)
+        b_start = batch.get("start_num", 1)
+        b_global_total = batch.get("total_labels_global", b_count)
+        
+        for i in range(b_count):
+            label_data = {
+                "lines": list(b_lines),
+                "show_num": b_inc_num,
+                "current_idx": b_start + i,
+                "total_idx": b_global_total
+            }
+            all_computed_labels.append(label_data)
+            
+    # 3. Impose the flattened label array onto A4 grid layout matrix
+    total_to_render = len(all_computed_labels)
+    label_ptr = 0
+    
+    while label_ptr < total_to_render:
         for r in range(rows):
             for c in range(cols):
-                if current_label > total_labels:
+                if label_ptr >= total_to_render:
                     break
-
+                
+                # Fetch calculated positions
                 x_left = margin_x_pt + c * (label_w_pt + gutter_x_pt)
                 y_top = a4_h - margin_y_pt - r * (label_h_pt + gutter_y_pt)
                 center_x = x_left + (label_w_pt / 2.0)
-
-                active_lines = list(lines_config)
-                if include_numbering:
-                    active_lines.append(
-                        {
-                            "text": f"{current_label} of {total_labels}",
-                            "font_size": 10,
-                            "bold": True,
-                        }
-                    )
-
+                
+                current_label_data = all_computed_labels[label_ptr]
+                active_lines = list(current_label_data["lines"])
+                
+                # Append sequential indexing if active
+                if current_label_data["show_num"]:
+                    active_lines.append({
+                        "text": f"{current_label_data['current_idx']} of {current_label_data['total_idx']}",
+                        "font_size": 10,
+                        "bold": True
+                    })
+                
+                # Render content blocks inside grid margins
                 total_content_lines = len(active_lines)
                 if total_content_lines > 0:
                     line_height = label_h_pt / (total_content_lines + 1)
                     current_y = y_top - line_height
-
+                    
                     for line in active_lines:
-                        font_name = (
-                            "Helvetica-Bold" if line["bold"] else "Helvetica"
-                        )
-                        can.setFont(font_name, line["font_size"])
-                        can.drawCentredString(
-                            center_x, current_y, str(line["text"])
-                        )
+                        font_name = "Helvetica-Bold" if line.get("bold", False) else "Helvetica"
+                        can.setFont(font_name, line.get("font_size", 12))
+                        can.drawCentredString(center_x, current_y, str(line.get("text", "")))
                         current_y -= line_height
-
-                current_label += 1
-
+                
+                label_ptr += 1
+                
+        # Commit the grid canvas page configuration and break cleanly to next page sheet
         can.showPage()
-
+        
     can.save()
     packet.seek(0)
     return packet
