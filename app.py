@@ -1075,33 +1075,32 @@ elif st.session_state.current_page == "batches_and_labels":
                     "bold": master_lines[i]["bold"]
                 })
 
-                        # Save sequential tracker step updates
+                                  # Save sequential tracker step updates
             running_label_counter += int(b_labels_count)
 
-    st.divider()
+ st.divider()
 
-    col_qty1, col_qty2 = st.columns(2)
-    with col_qty1:
-        total_labels = st.number_input(
-            "Total Labels to Print:",
-            min_value=1,
-            max_value=10000,
-            value=14,
-            step=1,
-        )
-    with col_qty2:
-        include_num = st.checkbox(
-            "Include Sequential Label Count (e.g. '1 of 14')?",
-            value=True,
-        )
+ col_qty1, col_qty2 = st.columns(2)
+ with col_qty1:
+  total_labels = st.number_input(
+   "Total Labels to Print:",
+   min_value=1,
+   max_value=10000,
+   value=14,
+   step=1,
+  )
+ with col_qty2:
+  include_num = st.checkbox(
+   "Include Sequential Label Count (e.g. '1 of 14')?",
+   value=True,
+  )
 
-     if st.button("Generate Imposed Labels PDF", type="primary"):
+ if st.button("Generate Imposed Labels PDF", type="primary"):
   with st.spinner("Generating labels layout..."):
    mm_to_pt = 2.83465
    
    # Verify breaks_configs has items, otherwise recreate a default segment from inputs
    if ('breaks_configs' not in locals()) or (not breaks_configs):
-    # Fallback definition to prevent empty 0-page loops
     breaks_configs = [{
      "count": int(total_labels) if 'total_labels' in locals() else 14,
      "include_numbering": include_num if 'include_num' in locals() else True,
@@ -1146,7 +1145,7 @@ elif st.session_state.current_page == "batches_and_labels":
 
    out_filename = "Imposed_Labels_Output.pdf"
    
-   if len(pdf_bytes) > 100:  # Verify file is not empty before showing download button
+   if len(pdf_bytes) > 100:
     st.success("Label sheet generated successfully!")
     st.download_button(
      label=f"⬇ Download {out_filename}",
