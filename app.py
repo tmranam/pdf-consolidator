@@ -283,8 +283,8 @@ def create_outside_work_label_file(
     return packet
 
 
-# Helper function for Print Labels Imposition
-def create_labels_pdf(
+# Upgraded Imposition Engine to Process Dynamic Content Array Breaks
+def create_labels_pdf_upgraded(
     rows,
     cols,
     label_w_pt,
@@ -293,53 +293,64 @@ def create_labels_pdf(
     gutter_y_pt,
     margin_x_pt,
     margin_y_pt,
-    lines_config,
-    total_labels,
-    include_numbering,
+    breaks_configs,
 ):
     packet = io.BytesIO()
     can = canvas.Canvas(packet, pagesize=A4)
     a4_w, a4_h = A4
+    
+    current_col = 0
+    current_row = 0
+    global_running_num = 1
 
-    current_label = 1
+    for b_idx, b_cfg in enumerate(breaks_configs):
+        b_labels_count = b_cfg["count"]
+        
+        for local_step in range(b_labels_count):
+            # Resolve individual tracking index numbers based on rules chosen
+            if b_cfg["num_mode"] == "Restart from new number":
+                display_current = b_cfg["start_num"] + local_step
+                display_total = b_cfg["end_num"]
+            else:
+                display_current = global_running_num
+                display_total = b_cfg["total_labels_global"]
 
-    while current_label <= total_labels:
-        for r in range(rows):
-            for c in range(cols):
-                if current_label > total_labels:
-                    break
+            # Calculate precise drawing geometry coordinates
+            x_left = margin_x_pt + current_col * (label_w_pt + gutter_x_pt)
+            y_top = a4_h - margin_y_pt - current_row * (label_h_pt + gutter_y_pt)
+            center_x = x_left + (label_w_pt / 2.0)
 
-                x_left = margin_x_pt + c * (label_w_pt + gutter_x_pt)
-                y_top = a4_h - margin_y_pt - r * (label_h_pt + gutter_y_pt)
-                center_x = x_left + (label_w_pt / 2.0)
+            active_lines = list(b_cfg["lines"])
+            if b_cfg["include_numbering"]:
+                active_lines.append(
+                    {
+                        "text": f"{display_current} of {display_total}",
+                        "font_size": 10,
+                        "bold": True,
+                    }
+                )
 
-                active_lines = list(lines_config)
-                if include_numbering:
-                    active_lines.append(
-                        {
-                            "text": f"{current_label} of {total_labels}",
-                            "font_size": 10,
-                            "bold": True,
-                        }
-                    )
+            total_content_lines = len(active_lines)
+            if total_content_lines > 0:
+                line_height = label_h_pt / (total_content_lines + 1)
+                current_y = y_top - line_height
+                for line in active_lines:
+                    font_name = "Helvetica-Bold" if line["bold"] else "Helvetica"
+                    can.setFont(font_name, line["font_size"])
+                    can.drawCentredString(center_x, current_y, str(line["text"]))
+                    current_y -= line_height
 
-                total_content_lines = len(active_lines)
-                if total_content_lines > 0:
-                    line_height = label_h_pt / (total_content_lines + 1)
-                    current_y = y_top - line_height
+            # Increment cell location pointers
+            current_col += 1
+            if current_col >= cols:
+                current_col = 0
+                current_row += 1
+                if current_row >= rows:
+                    current_row = 0
+                    can.showPage()
+            global_running_num += 1
 
-                    for line in active_lines:
-                        font_name = (
-                            "Helvetica-Bold" if line["bold"] else "Helvetica"
-                        )
-                        can.setFont(font_name, line["font_size"])
-                        can.drawCentredString(
-                            center_x, current_y, str(line["text"])
-                        )
-                        current_y -= line_height
-
-                current_label += 1
-
+    if current_col != 0 or current_row != 0:
         can.showPage()
 
     can.save()
@@ -859,7 +870,7 @@ elif st.session_state.current_page == "batches_and_labels":
                         mime="application/pdf",
                     )
 
-       # --- SUBTAB 2: PRINT LABELS ---
+          # --- SUBTAB 2: PRINT LABELS ---
     elif st.session_state.batches_subtab == "print_labels":
         st.markdown("### 🖨️ Print Labels Generator")
         st.write(
@@ -869,108 +880,36 @@ elif st.session_state.current_page == "batches_and_labels":
         st.markdown("#### 1. Page Layout & Label Dimensions (mm)")
         col_grid1, col_grid2 = st.columns(2)
         with col_grid1:
-            rows = st.number_input(
-                "Rows per A4 Page:", min_value=1, max_value=20, value=7, step=1
-            )
-            cols = st.number_input(
-                "Columns per A4 Page:",
-                min_value=1,
-                max_value=10,
-                value=2,
-                step=1,
-            )
-            label_w_mm = st.number_input(
-                "Label Width (mm):",
-                min_value=10.0,
-                max_value=210.0,
-                value=99.1,
-                step=0.5,
-            )
-            label_h_mm = st.number_input(
-                "Label Height (mm):",
-                min_value=10.0,
-                max_value=297.0,
-                value=38.1,
-                step=0.5,
-            )
-
+            rows = st.number_input("Rows per A4 Page:", min_value=1, max_value=20, value=7, step=1)
+            cols = st.number_input("Columns per A4 Page:", min_value=1, max_value=10, value=2, step=1)
+            label_w_mm = st.number_input("Label Width (mm):", min_value=10.0, max_value=210.0, value=99.1, step=0.5)
+            label_h_mm = st.number_input("Label Height (mm):", min_value=10.0, max_value=297.0, value=38.1, step=0.5)
         with col_grid2:
-            gutter_x_mm = st.number_input(
-                "Horizontal Gutter (mm):",
-                min_value=0.0,
-                max_value=50.0,
-                value=2.5,
-                step=0.5,
-            )
-            gutter_y_mm = st.number_input(
-                "Vertical Gutter (mm):",
-                min_value=0.0,
-                max_value=50.0,
-                value=0.0,
-                step=0.5,
-            )
-            margin_x_mm = st.number_input(
-                "Page Side Margin (mm):",
-                min_value=0.0,
-                max_value=50.0,
-                value=4.5,
-                step=0.5,
-            )
-            margin_y_mm = st.number_input(
-                "Page Top Margin (mm):",
-                min_value=0.0,
-                max_value=50.0,
-                value=15.0,
-                step=0.5,
-            )
+            gutter_x_mm = st.number_input("Horizontal Gutter (mm):", min_value=0.0, max_value=50.0, value=2.5, step=0.5)
+            gutter_y_mm = st.number_input("Vertical Gutter (mm):", min_value=0.0, max_value=50.0, value=0.0, step=0.5)
+            margin_x_mm = st.number_input("Page Side Margin (mm):", min_value=0.0, max_value=50.0, value=4.5, step=0.5)
+            margin_y_mm = st.number_input("Page Top Margin (mm):", min_value=0.0, max_value=50.0, value=15.0, step=0.5)
 
         st.divider()
-
         st.markdown("#### 2. Label Master Content & Quantity")
-        num_lines = st.number_input(
-            "Number of Text Lines per Label:",
-            min_value=1,
-            max_value=10,
-            value=2,
-            step=1,
-        )
+        num_lines = st.number_input("Number of Text Lines per Label:", min_value=1, max_value=10, value=2, step=1)
 
         # 1. Setup Master Baseline Configuration
         master_lines = []
         st.markdown("##### 🖋️ Configure Master Baseline Values")
         for i in range(int(num_lines)):
-            l_col1, l_col2, l_col3 = st.columns([3, 1, 1])
+            l_col1, l_col2, l_col3 = st.columns()
             with l_col1:
-                m_text = st.text_input(
-                    f"Line {i+1} Master Text:",
-                    value=f"Sample Text {i+1}",
-                    key=f"master_text_{i}",
-                )
+                m_text = st.text_input(f"Line {i+1} Master Text:", value=f"Sample Text {i+1}", key=f"master_text_{i}")
             with l_col2:
-                m_sz = st.number_input(
-                    f"Line {i+1} Master Size:",
-                    min_value=6,
-                    max_value=72,
-                    value=12,
-                    step=1,
-                    key=f"master_size_{i}",
-                )
+                m_sz = st.number_input(f"Line {i+1} Master Size:", min_value=6, max_value=72, value=12, step=1, key=f"master_size_{i}")
             with l_col3:
-                m_bld = st.checkbox(
-                    "Bold", value=(i == 0), key=f"master_bold_{i}"
-                )
+                m_bld = st.checkbox("Bold", value=(i == 0), key=f"master_bold_{i}")
             master_lines.append({"text": m_text, "font_size": m_sz, "bold": m_bld})
 
         st.divider()
         st.markdown("#### 3. Batch Break Segment Control Matrix")
-        
-        num_breaks = st.number_input(
-            "Number of Breaks / Batch Segments:",
-            min_value=1,
-            max_value=100,
-            value=1,
-            step=1,
-        )
+        num_breaks = st.number_input("Number of Breaks / Batch Segments:", min_value=1, max_value=100, value=1, step=1)
 
         breaks_configs = []
         running_label_counter = 1
@@ -982,20 +921,11 @@ elif st.session_state.current_page == "batches_and_labels":
             
             col_b1, col_b2, col_b3 = st.columns(3)
             with col_b1:
-                b_labels_count = st.number_input(
-                    f"Total Labels for Batch #{b+1}:",
-                    min_value=1, value=14, step=1, key=f"b_count_{b}"
-                )
+                b_labels_count = st.number_input(f"Total Labels for Batch #{b+1}:", min_value=1, value=14, step=1, key=f"b_count_{b}")
             with col_b2:
-                include_num = st.checkbox(
-                    "Include Sequence Counter?", value=True, key=f"b_inc_num_{b}"
-                )
+                include_num = st.checkbox("Include Sequence Counter?", value=True, key=f"b_inc_num_{b}")
             with col_b3:
-                r_num_mode = st.radio(
-                    f"Sequence Slicing Logic:",
-                    ["Continue from previous batch", "Restart from new number"],
-                    key=f"b_mode_{b}"
-                )
+                r_num_mode = st.radio(f"Sequence Slicing Logic:", ["Continue from previous batch", "Restart from new number"], key=f"b_mode_{b}")
 
             # Explicit sequence constraints allocation
             start_num = running_label_counter
@@ -1004,33 +934,23 @@ elif st.session_state.current_page == "batches_and_labels":
             if r_num_mode == "Restart from new number":
                 nc1, nc2 = st.columns(2)
                 with nc1:
-                    start_num = st.number_input(
-                        "Start Number Overwrite:", min_value=1, value=1, key=f"b_start_{b}"
-                    )
+                    start_num = st.number_input("Start Number Overwrite:", min_value=1, value=1, key=f"b_start_{b}")
                 with nc2:
-                    end_num = st.number_input(
-                        "End Number (Denominator limit):", min_value=1, value=14, key=f"b_end_{b}"
-                    )
+                    end_num = st.number_input("End Number (Denominator limit):", min_value=1, value=14, key=f"b_end_{b}")
 
             b_final_lines = []
             st.markdown(f"⚙️ **Line Content Overrides for Batch #{b+1}:**")
             
             for i in range(int(num_lines)):
-                cc1, cc2 = st.columns([2, 3])
+                cc1, cc2 = st.columns()
                 with cc1:
-                    stay_same = st.checkbox(
-                        "Stay Same / Inherit", value=True, key=f"b_same_{b}_{i}"
-                    )
+                    stay_same = st.checkbox("Stay Same / Inherit", value=True, key=f"b_same_{b}_{i}")
                 with cc2:
                     if stay_same:
                         st.caption(f"Inherited: *\"{master_lines[i]['text']}\"*")
                         line_txt = master_lines[i]["text"]
                     else:
-                        line_txt = st.text_input(
-                            f"Modify Line {i+1} Text:",
-                            value=master_lines[i]["text"],
-                            key=f"b_text_override_{b}_{i}"
-                        )
+                        line_txt = st.text_input(f"Modify Line {i+1} Text:", value=master_lines[i]["text"], key=f"b_text_override_{b}_{i}")
                 
                 b_final_lines.append({
                     "text": line_txt,
@@ -1047,8 +967,6 @@ elif st.session_state.current_page == "batches_and_labels":
                 "lines": b_final_lines,
                 "total_labels_global": int(b_labels_count)
             })
-            
-            # Save sequential tracker step updates
             running_label_counter += int(b_labels_count)
 
         st.divider()
@@ -1077,7 +995,6 @@ elif st.session_state.current_page == "batches_and_labels":
                 )
 
                 out_filename = "Imposed_Labels_Output.pdf"
-
                 st.success("Label sheet generated successfully!")
                 st.download_button(
                     label=f"⬇️ Download {out_filename}",
