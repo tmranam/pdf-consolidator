@@ -1065,17 +1065,21 @@ elif st.session_state.current_page == "batches_and_labels":
                         item["total_labels_global"] = total_global_sum
 
                 # Trigger new multi-segment backend renderer function signature
-                pdf_bytes = create_labels_pdf(
-                    rows=int(rows),
-                    cols=int(cols),
-                    label_w_pt=label_w_mm * mm_to_pt,
-                    label_h_pt=label_h_mm * mm_to_pt,
-                    gutter_x_pt=gutter_x_mm * mm_to_pt,
-                    gutter_y_pt=gutter_y_mm * mm_to_pt,
-                    margin_x_pt=margin_x_mm * mm_to_pt,
-                    margin_y_pt=margin_y_mm * mm_to_pt,
-                    breaks_configs=breaks_configs,
-                )
+                # Trigger the function with the required parameters added
+pdf_bytes = create_labels_pdf(
+    rows=int(rows),
+    cols=int(cols),
+    label_w_pt=label_w_mm * mm_to_pt,
+    label_h_pt=label_h_mm * mm_to_pt,
+    gutter_x_pt=gutter_x_mm * mm_to_pt,
+    gutter_y_pt=gutter_y_mm * mm_to_pt,
+    margin_x_pt=margin_x_mm * mm_to_pt,
+    margin_y_pt=margin_y_mm * mm_to_pt,
+    lines_config=lines_config,          # <-- ADD THIS (Make sure this variable exists in your UI loop)
+    total_labels=total_global_sum,      # <-- ADD THIS (You already calculated total_global_sum above!)
+    include_numbering=True,             # <-- ADD THIS (Set to True or False depending on your UI checkbox)
+    breaks_configs=breaks_configs,
+)
 
                 out_filename = "Imposed_Labels_Output.pdf"
 
