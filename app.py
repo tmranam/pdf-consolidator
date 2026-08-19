@@ -10,7 +10,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
 import streamlit as st
 
-# Set page layout once at the top
+# Set page layout once at the top with correct comma styling
 st.set_page_config(
     page_title="PDF Toolsuite Dashboard", page_icon="🛠️", layout="centered"
 )
@@ -291,4 +291,3 @@ def create_labels_pdf(
     margin_x_pt,
     margin_y_pt,
     lines_config,
-    total_labels,
