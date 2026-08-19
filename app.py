@@ -291,3 +291,4 @@ def create_labels_pdf(
     margin_x_pt,
     margin_y_pt,
     lines_config,
+    total_labels,
