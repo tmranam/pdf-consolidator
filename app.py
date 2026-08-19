@@ -200,7 +200,7 @@ base_data = {
 }
 
 st.subheader("2. Sub-Range Interval Multi-Matrix Manager")
-st.info(f"Distribute properties dynamically across your targeted target total of **{total_boxes}** units.")
+st.info(f"Distribute properties dynamically across your targeted total of **{total_boxes}** units.")
 
 # Initialize dynamic range tracking array state
 if "range_count" not in st.session_state:
@@ -272,3 +272,4 @@ covered_markers = set()
 for index, item in enumerate(range_configs):
     for val in range(item["start"], item["end"] + 1):
         if val in covered_markers:
+            coverage_errors.append(f"Overlap detected: Unit block indicator '{val}' is double-mapped inside multiple configuration modules.")
