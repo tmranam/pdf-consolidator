@@ -1055,52 +1055,42 @@ elif st.session_state.current_page == "batches_and_labels":
         st.divider()
 
                        # Ensure there are exactly 8 spaces before 'if'
-               if st.button("Generate Imposed Labels PDF", type="primary"):
-            with st.spinner("Generating labels layout..."):
-                mm_to_pt = 2.83465
-                
-                # Align denominators for the sequential continuous blocks
-                total_global_sum = sum(item["count"] for item in breaks_configs)
-                for item in breaks_configs:
-                    if item["num_mode"] == "Continue from previous batch":
-                        item["total_labels_global"] = total_global_sum
+ if st.button("Generate Imposed Labels PDF", type="primary"):
+  with st.spinner("Generating labels layout..."):
+   mm_to_pt = 2.83465
+   
+   # Align denominators for the sequential continuous blocks
+   total_global_sum = sum(item["count"] for item in breaks_configs)
+   for item in breaks_configs:
+    if item["num_mode"] == "Continue from previous batch":
+     item["total_labels_global"] = total_global_sum
 
-                # Fetch lines_config if it exists, otherwise fall back to empty list safely
-                active_lines = lines_config if 'lines_config' in locals() else []
-                
-                # Fetch checkbox state safely, fallback to True if missing
-                active_num = include_num if 'include_num' in locals() else True
+   # Fetch configs safely from session variables or defaults
+   active_lines = lines_config if 'lines_config' in locals() else []
+   active_num = include_num if 'include_num' in locals() else True
 
-                # Trigger backend renderer with exact variable alignments
-                pdf_bytes = create_labels_pdf(
-                    rows=int(rows),
-                    cols=int(cols),
-                    label_w_pt=label_w_mm * mm_to_pt,
-                    label_h_pt=label_h_mm * mm_to_pt,
-                    gutter_x_pt=gutter_x_mm * mm_to_pt,
-                    gutter_y_pt=gutter_y_mm * mm_to_pt,
-                    margin_x_pt=margin_x_mm * mm_to_pt,
-                    margin_y_pt=margin_y_mm * mm_to_pt,
-                    lines_config=active_lines,
-                    total_labels=int(total_global_sum),
-                    include_numbering=active_num,
-                    breaks_configs=breaks_configs,
-                )
-
-                out_filename = "Imposed_Labels_Output.pdf"
-
-                st.success("Label sheet generated successfully!")
-                st.download_button(
-                    label=f"⬇️ Download {out_filename}",
-                    data=pdf_bytes,
-                    file_name=out_filename,
-                    mime="application/pdf",
-                )
-
-
-
-
-
+   pdf_bytes = create_labels_pdf(
+    rows=int(rows),
+    cols=int(cols),
+    label_w_pt=label_w_mm * mm_to_pt,
+    label_h_pt=label_h_mm * mm_to_pt,
+    gutter_x_pt=gutter_x_mm * mm_to_pt,
+    gutter_y_pt=gutter_y_mm * mm_to_pt,
+    margin_x_pt=margin_x_mm * mm_to_pt,
+    margin_y_pt=margin_y_mm * mm_to_pt,
+    lines_config=active_lines,
+    total_labels=int(total_global_sum),
+    include_numbering=active_num,
+    breaks_configs=breaks_configs,
+   )
+   out_filename = "Imposed_Labels_Output.pdf"
+   st.success("Label sheet generated successfully!")
+   st.download_button(
+    label=f"⬇ Download {out_filename}",
+    data=pdf_bytes,
+    file_name=out_filename,
+    mime="application/pdf",
+   )
 # ---------------------------------------------------------
 # PAGE 5: GENERAL SETTINGS
 # ---------------------------------------------------------
