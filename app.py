@@ -1055,6 +1055,21 @@ elif st.session_state.current_page == "batches_and_labels":
         st.divider()
 
                        # Ensure there are exactly 8 spaces before 'if'
+ col_qty1, col_qty2 = st.columns(2)
+ with col_qty1:
+  total_labels = st.number_input(
+   "Total Labels to Print:",
+   min_value=1,
+   max_value=10000,
+   value=14,
+   step=1,
+  )
+ with col_qty2:
+  include_num = st.checkbox(
+   "Include Sequential Label Count (e.g. '1 of 14')?",
+   value=True,
+  )
+
  if st.button("Generate Imposed Labels PDF", type="primary"):
   with st.spinner("Generating labels layout..."):
    mm_to_pt = 2.83465
@@ -1083,6 +1098,7 @@ elif st.session_state.current_page == "batches_and_labels":
     include_numbering=active_num,
     breaks_configs=breaks_configs,
    )
+
    out_filename = "Imposed_Labels_Output.pdf"
    st.success("Label sheet generated successfully!")
    st.download_button(
@@ -1091,6 +1107,7 @@ elif st.session_state.current_page == "batches_and_labels":
     file_name=out_filename,
     mime="application/pdf",
    )
+
 # ---------------------------------------------------------
 # PAGE 5: GENERAL SETTINGS
 # ---------------------------------------------------------
