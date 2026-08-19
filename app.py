@@ -1095,44 +1095,67 @@ elif st.session_state.current_page == "batches_and_labels":
             value=True,
         )
 
-    if st.button("Generate Imposed Labels PDF", type="primary"):
-        with st.spinner("Generating labels layout..."):
-            mm_to_pt = 2.83465
-            
-            # Align denominators for the sequential continuous blocks
-            total_global_sum = sum(item["count"] for item in breaks_configs)
-            for item in breaks_configs:
-                if item["num_mode"] == "Continue from previous batch":
-                    item["total_labels_global"] = total_global_sum
+     if st.button("Generate Imposed Labels PDF", type="primary"):
+  with st.spinner("Generating labels layout..."):
+   mm_to_pt = 2.83465
+   
+   # Verify breaks_configs has items, otherwise recreate a default segment from inputs
+   if ('breaks_configs' not in locals()) or (not breaks_configs):
+    # Fallback definition to prevent empty 0-page loops
+    breaks_configs = [{
+     "count": int(total_labels) if 'total_labels' in locals() else 14,
+     "include_numbering": include_num if 'include_num' in locals() else True,
+     "num_mode": "Restart from new number",
+     "start_num": 1,
+     "end_num": int(total_labels) if 'total_labels' in locals() else 14,
+     "lines": lines_config if 'lines_config' in locals() else [],
+     "total_labels_global": int(total_labels) if 'total_labels' in locals() else 14
+    }]
 
-            # Fetch configs safely from local variables or defaults
-            active_lines = lines_config if 'lines_config' in locals() else []
-            active_num = include_num if 'include_num' in locals() else True
+   # Align denominators safely
+   total_global_sum = sum(item.get("count", 0) for item in breaks_configs)
+   for item in breaks_configs:
+    if item.get("num_mode") == "Continue from previous batch":
+     item["total_labels_global"] = total_global_sum
 
-            pdf_bytes = create_labels_pdf(
-                rows=int(rows),
-                cols=int(cols),
-                label_w_pt=label_w_mm * mm_to_pt,
-                label_h_pt=label_h_mm * mm_to_pt,
-                gutter_x_pt=gutter_x_mm * mm_to_pt,
-                gutter_y_pt=gutter_y_mm * mm_to_pt,
-                margin_x_pt=margin_x_mm * mm_to_pt,
-                margin_y_pt=margin_y_mm * mm_to_pt,
-                lines_config=active_lines,
-                total_labels=int(total_global_sum),
-                include_numbering=active_num,
-                breaks_configs=breaks_configs,
-            )
+   # Fetch configurations safely
+   active_lines = lines_config if 'lines_config' in locals() else []
+   active_num = include_num if 'include_num' in locals() else True
 
-            out_filename = "Imposed_Labels_Output.pdf"
-            st.success("Label sheet generated successfully!")
-            st.download_button(
-                label=f"⬇ Download {out_filename}",
-                data=pdf_bytes,
-                file_name=out_filename,
-                mime="application/pdf",
-            )
+   # Call the backend engine function
+   pdf_buffer = create_labels_pdf(
+    rows=int(rows),
+    cols=int(cols),
+    label_w_pt=label_w_mm * mm_to_pt,
+    label_h_pt=label_h_mm * mm_to_pt,
+    gutter_x_pt=gutter_x_mm * mm_to_pt,
+    gutter_y_pt=gutter_y_mm * mm_to_pt,
+    margin_x_pt=margin_x_mm * mm_to_pt,
+    margin_y_pt=margin_y_mm * mm_to_pt,
+    lines_config=active_lines,
+    total_labels=int(total_global_sum),
+    include_numbering=active_num,
+    breaks_configs=breaks_configs,
+   )
 
+   # Convert the returned BytesIO stream object to raw data payload bytes
+   if hasattr(pdf_buffer, "getvalue"):
+    pdf_bytes = pdf_buffer.getvalue()
+   else:
+    pdf_bytes = pdf_buffer
+
+   out_filename = "Imposed_Labels_Output.pdf"
+   
+   if len(pdf_bytes) > 100:  # Verify file is not empty before showing download button
+    st.success("Label sheet generated successfully!")
+    st.download_button(
+     label=f"⬇ Download {out_filename}",
+     data=pdf_bytes,
+     file_name=out_filename,
+     mime="application/pdf",
+    )
+   else:
+    st.error("Error: The generated PDF is empty. Please verify your batch label counts.")
 
 # ---------------------------------------------------------
 # PAGE 5: GENERAL SETTINGS
