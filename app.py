@@ -1064,7 +1064,7 @@ elif st.session_state.current_page == "batches_and_labels":
                         item["total_labels_global"] = total_global_sum
 
                 # Trigger new multi-segment backend renderer function signature
-                pdf_bytes = create_labels_pdf_upgraded(
+                pdf_bytes = create_labels_pdf(
                     rows=int(rows),
                     cols=int(cols),
                     label_w_pt=label_w_mm * mm_to_pt,
