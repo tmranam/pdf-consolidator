@@ -1079,8 +1079,10 @@ pdf_bytes = create_labels_pdf(
     total_labels=total_global_sum,      # <-- ADD THIS (You already calculated total_global_sum above!)
     include_numbering=True,             # <-- ADD THIS (Set to True or False depending on your UI checkbox)
     breaks_configs=breaks_configs,
-)
+                # Make sure this closing parenthesis aligns with your indentation
+                )
 
+                # Fix lines below: Ensure they all have exactly 16 spaces (4 tabs) of indentation
                 out_filename = "Imposed_Labels_Output.pdf"
 
                 st.success("Label sheet generated successfully!")
@@ -1090,6 +1092,7 @@ pdf_bytes = create_labels_pdf(
                     file_name=out_filename,
                     mime="application/pdf",
                 )
+
 
 # ---------------------------------------------------------
 # PAGE 5: GENERAL SETTINGS
