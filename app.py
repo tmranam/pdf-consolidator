@@ -120,132 +120,128 @@ def create_batch_header_file(
     return packet
 
 
-# Helper function for Outside Work Label generator matching image format exactly
-def create_outside_work_label_file(
-    supplier,
-    job_no,
-    client,
-    job_title,
-    qty_this_pallet,
-    total_pallets,
-    auto_number_pallets=True,
+# Upgraded Outside Work Label generator handling multi-range segmentation matrices cleanly
+def create_outside_work_label_ranged_file(
+    supplier, job_no, client, default_title, total_pallets, range_configs
 ):
     packet = io.BytesIO()
     can = canvas.Canvas(packet, pagesize=A4)
     page_width, page_height = A4
 
-    # Theme colors extracted from reference design
     cyan_bg = HexColor("#00AEEF")
     dark_frame = HexColor("#1A1A1A")
     text_dark = HexColor("#1A1A1A")
-
-    # 80mm top clearance conversion (1 mm = ~2.83465 points)
     top_clearance_pt = 80 * 2.83465
 
-    for i in range(1, total_pallets + 1):
-        # 1. Fill Page Background (Bright Cyan/Blue)
-        can.setFillColor(cyan_bg)
-        can.rect(0, 0, page_width, page_height, fill=1, stroke=0)
+    global_counter = 1
 
-        # 2. Outer Chamfered Border Frame (starts below the 80mm clearance)
-        margin_x = 35
-        margin_bottom = 35
-        margin_top = top_clearance_pt
-        corner_cut = 25  # Corner angle cutout at the top
+    # Loop through each custom partitioned user sub-range block matrix
+    for r_idx, cfg in enumerate(range_configs):
+        st_val = cfg["start"]
+        en_val = cfg["end"]
+        qty_val = cfg["qty"]
+        title_val = cfg["title"] if cfg["title"] else default_title
+        num_mode = cfg["num_mode"]
+        denom_mode = cfg["denom_mode"]
 
-        frame_top_y = page_height - margin_top
+        range_total_size = (en_val - st_val) + 1
 
-        path = can.beginPath()
-        path.moveTo(margin_x + corner_cut, frame_top_y)
-        path.lineTo(page_width - margin_x - corner_cut, frame_top_y)
-        path.lineTo(page_width - margin_x, frame_top_y - corner_cut)
-        path.lineTo(page_width - margin_x, margin_bottom)
-        path.lineTo(margin_x, margin_bottom)
-        path.lineTo(margin_x, frame_top_y - corner_cut)
-        path.close()
+        for step in range(range_total_size):
+            # Calculate current running pallet number text string
+            if num_mode == "Start from beginning (1)":
+                display_current = step + 1
+            else:
+                display_current = global_counter
 
-        can.setStrokeColor(dark_frame)
-        can.setLineWidth(5)
-        can.drawPath(path, fill=0, stroke=1)
+            # Calculate base denominator limit text string
+            if denom_mode == "Range size limit":
+                display_total = range_total_size
+            else:
+                display_total = total_pallets
 
-        # 3. Top Section: From Address & Logo (shifted down below 80mm gap)
-        can.setFillColor(text_dark)
-        can.setFont("Helvetica-Bold", 11)
-        can.drawString(margin_x + 20, frame_top_y - 40, "From:")
-        can.setFont("Helvetica-Bold", 14)
-        can.drawString(margin_x + 20, frame_top_y - 58, "IVE Print")
-        can.setFont("Helvetica", 11)
-        can.drawString(margin_x + 20, frame_top_y - 74, "24-36 Beyer Rd, Braeside")
-        can.drawString(margin_x + 20, frame_top_y - 88, "Victoria 3195")
+            # 1. Fill Page Background (Bright Cyan/Blue)
+            can.setFillColor(cyan_bg)
+            can.rect(0, 0, page_width, page_height, fill=1, stroke=0)
 
-        # Top Right "ive" logo
-        can.setFont("Helvetica-Bold", 46)
-        can.drawRightString(
-            page_width - margin_x - 25, frame_top_y - 70, "ive"
-        )
+            # 2. Outer Chamfered Border Frame
+            margin_x, margin_bottom, corner_cut = 35, 35, 25
+            frame_top_y = page_height - top_clearance_pt
 
-        # 4. Dark Block Banner: "OUTSIDE WORK"
-        banner_y = frame_top_y - 260
-        banner_h = 160
-        can.setFillColor(dark_frame)
-        can.rect(
-            margin_x,
-            banner_y,
-            page_width - (margin_x * 2),
-            banner_h,
-            fill=1,
-            stroke=0,
-        )
+            path = can.beginPath()
+            path.moveTo(margin_x + corner_cut, frame_top_y)
+            path.lineTo(page_width - margin_x - corner_cut, frame_top_y)
+            path.lineTo(page_width - margin_x, frame_top_y - corner_cut)
+            path.lineTo(page_width - margin_x, margin_bottom)
+            path.lineTo(margin_x, margin_bottom)
+            path.lineTo(margin_x, frame_top_y - corner_cut)
+            path.close()
 
-        can.setFillColor(HexColor("#FFFFFF"))
-        can.setFont("Helvetica-Bold", 80)
-        can.drawCentredString(page_width / 2.0, banner_y + 92, "OUTSIDE")
-        can.drawCentredString(page_width / 2.0, banner_y + 32, "WORK")
-
-        # 5. Form Fields with Dotted Baseline Guides
-        fields = [
-            ("Supplier:", supplier),
-            ("Job No:", job_no),
-            ("Client:", client),
-            ("Job Title:", job_title),
-            ("Qty this pallet:", qty_this_pallet),
-        ]
-
-        y_start = banner_y - 38
-        line_gap = 36
-
-        can.setFillColor(text_dark)
-
-        for idx, (label, val) in enumerate(fields):
-            curr_y = y_start - (idx * line_gap)
-
-            # Field Label
-            can.setFont("Helvetica", 15)
-            can.drawString(margin_x + 20, curr_y, label)
-
-            label_width = can.stringWidth(label, "Helvetica", 15)
-            dots_x_start = margin_x + 25 + label_width
-
-            # Render Form Entry Text
-            if val:
-                can.setFont("Helvetica-Bold", 18)
-                can.drawString(dots_x_start + 10, curr_y, str(val))
-
-            # Render Dotted Line Baseline
             can.setStrokeColor(dark_frame)
-            can.setLineWidth(1)
-            can.setDash([1, 3], 0)
-            can.line(dots_x_start, curr_y - 2, page_width - margin_x - 20, curr_y - 2)
+            can.setLineWidth(5)
+            can.drawPath(path, fill=0, stroke=1)
 
-        # Pallet numbering section
-        can.setFont("Helvetica-Bold", 24)
-        can.drawString(margin_x + 20, margin_bottom + 40, "PALLET NUMBER:")
-        
-        can.setFont("Helvetica-Bold", 40)
-        pallet_str = f"{i} OF {total_pallets}" if auto_number_pallets else f"{i} OF ______"
-        can.drawString(margin_x + 260, margin_bottom + 38, pallet_str)
+            # 3. Top Section: From Address & Logo
+            can.setFillColor(text_dark)
+            can.setFont("Helvetica-Bold", 11)
+            can.drawString(margin_x + 20, frame_top_y - 40, "From:")
+            can.setFont("Helvetica-Bold", 14)
+            can.drawString(margin_x + 20, frame_top_y - 58, "IVE Print")
+            can.setFont("Helvetica", 11)
+            can.drawString(margin_x + 20, frame_top_y - 74, "24-36 Beyer Rd, Braeside")
+            can.drawString(margin_x + 20, frame_top_y - 88, "Victoria 3195")
 
-        can.showPage()
+            can.setFont("Helvetica-Bold", 46)
+            can.drawRightString(page_width - margin_x - 25, frame_top_y - 70, "ive")
+
+            # 4. Dark Block Banner: "OUTSIDE WORK"
+            banner_y, banner_h = frame_top_y - 260, 160
+            can.setFillColor(dark_frame)
+            can.rect(margin_x, banner_y, page_width - (margin_x * 2), banner_h, fill=1, stroke=0)
+
+            can.setFillColor(HexColor("#FFFFFF"))
+            can.setFont("Helvetica-Bold", 80)
+            can.drawCentredString(page_width / 2.0, banner_y + 92, "OUTSIDE")
+            can.drawCentredString(page_width / 2.0, banner_y + 32, "WORK")
+
+            # 5. Form Fields with Dotted Baseline Guides
+            fields = [
+                ("Supplier:", supplier),
+                ("Job No:", job_no),
+                ("Client:", client),
+                ("Job Title:", title_val),
+                ("Qty this pallet:", qty_val),
+            ]
+
+            y_start, line_gap = banner_y - 38, 36
+            can.setFillColor(text_dark)
+
+            for idx, (label, val) in enumerate(fields):
+                curr_y = y_start - (idx * line_gap)
+                can.setFont("Helvetica", 15)
+                can.drawString(margin_x + 20, curr_y, label)
+
+                label_width = can.stringWidth(label, "Helvetica", 15)
+                dots_x_start = margin_x + 25 + label_width
+
+                if val:
+                    can.setFont("Helvetica-Bold", 18)
+                    can.drawString(dots_x_start + 10, curr_y, str(val))
+
+                can.setStrokeColor(dark_frame)
+                can.setLineWidth(1)
+                can.setDash([1, 3], 0)
+                can.line(dots_x_start, curr_y - 2, page_width - margin_x - 20, curr_y - 2)
+
+            # Pallet Numbering Footer Execution Block
+            can.setFont("Helvetica-Bold", 24)
+            can.drawString(margin_x + 20, margin_bottom + 40, "PALLET NUMBER:")
+            
+            can.setFont("Helvetica-Bold", 40)
+            pallet_str = f"{display_current} OF {display_total}"
+            can.drawString(margin_x + 260, margin_bottom + 38, pallet_str)
+
+            can.showPage()
+            global_counter += 1
 
     can.save()
     packet.seek(0)
@@ -253,11 +249,27 @@ def create_outside_work_label_file(
 
 
 # -------------------------------------------------------------------------
-# UI INTERFACE ROUTING (RESTORED TO ORIGINAL NAVIGATION BASE)
+# STREAMLIT INTERACTIVE USER INTERFACE CONTEXT DASHBOARD
 # -------------------------------------------------------------------------
-st.title("⚙️ PDF Toolsuite Dashboard")
+st.title("🛠️ PDF Toolsuite Dashboard")
 
-# Render your original layout controls here...
+# Top Navigation Management Links
+st.sidebar.markdown("### Navigation Apps")
+if st.sidebar.button("Batch Consolidator Page"):
+    st.session_state.current_page = "batch_consolidator"
+if st.sidebar.button("Production Headers & Labels Workspace"):
+    st.session_state.current_page = "batches_subtab"
+
+# Execution Routing Layers
 if st.session_state.current_page == "batch_consolidator":
-    st.subheader("📂 Batch Consolidator App")
-    st.info("Original workspace is clean and active.")
+    st.subheader("📂 Batch Consolidator Hub")
+    st.info("Upload source print document tracking manifests to parse cover metrics.")
+
+elif st.session_state.current_page == "batches_subtab":
+    sub_tab1, sub_tab2 = st.tabs(["🗂️ Standard Batch Headers", "📦 Outside Work Labels"])
+
+    with sub_tab1:
+        st.subheader("Standard Batch Header Generator")
+        with st.form("batch_header_form"):
+            job_no = st.text_input("Job Number", value="100234")
+            description = st.text_area("Description Field Specifications")
