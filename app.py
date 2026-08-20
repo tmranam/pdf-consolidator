@@ -1219,14 +1219,6 @@ elif st.session_state.current_page == "batches_and_labels":
             gutter_y_mm = st.number_input("Vertical Gutter (mm):", min_value=0.0, value=0.0, key="file_gy")
             margin_x_mm = st.number_input("Page Side Margin (mm):", min_value=0.0, value=4.5, key="file_mx")
             margin_y_mm = st.number_input("Page Top Margin (mm):", min_value=0.0, value=15.0, key="file_my")
-
-# ---------------------------------------------------------
-# PAGE 5: GENERAL SETTINGS
-# ---------------------------------------------------------
-elif st.session_state.current_page == "general":
-    st.subheader("⚙️ General Settings")
-    st.write("Configure application parameters and system defaults.")
-    st.info("System operational. All dependencies loaded.")
         st.divider()
         st.markdown("#### 2. Label Content Structure & Column Mapping Matrix")
         num_lines = st.number_input("Number of Text Lines per Label:", min_value=1, max_value=10, value=2, key="file_num_lines")
@@ -1360,3 +1352,11 @@ elif st.session_state.current_page == "general":
                         st.download_button(label="⬇ Download Imposed_Data_Labels_Output.pdf", data=pdf_bytes, file_name="Imposed_Data_Labels_Output.pdf", mime="application/pdf")
                     else:
                         st.error("Error generating label document matrix. Review parameters.")
+# ---------------------------------------------------------
+# PAGE 5: GENERAL SETTINGS
+# ---------------------------------------------------------
+elif st.session_state.current_page == "general":
+    st.subheader("⚙️ General Settings")
+    st.write("Configure application parameters and system defaults.")
+    st.info("System operational. All dependencies loaded.")
+
