@@ -766,23 +766,23 @@ elif st.session_state.current_page == "batch_consolidator":
 elif st.session_state.current_page == "batches_and_labels":
     st.subheader("🏷️ Batches & Labels Dashboard")
 
-    # Expand navigation to 3 distinct button panels
+    # ONE unified navigation panel layout with explicit tracking keys
     sub_col1, sub_col2, sub_col3 = st.columns(3)
     with sub_col1:
-        if st.button("🏷️ Batch Headers", use_container_width=True): 
+        if st.button("🏷️ Batch Headers", use_container_width=True, key="nav_btn_headers"): 
             st.session_state.batches_subtab = "batch_headers"
     with sub_col2:
-        if st.button("🖨️ Print Labels", use_container_width=True): 
+        if st.button("🖨️ Print Labels", use_container_width=True, key="nav_btn_labels"): 
             st.session_state.batches_subtab = "print_labels"
     with sub_col3:
-        if st.button("📁 Print from File", use_container_width=True): 
+        if st.button("📁 Print from File", use_container_width=True, key="nav_btn_file"): 
             st.session_state.batches_subtab = "print_from_file"
 
     st.divider()
 
-
     # --- SUBTAB 1: BATCH HEADERS ---
     if st.session_state.batches_subtab == "batch_headers":
+
         st.markdown("### 🏷️ Batch Headers Generator")
         st.write(
             "Generate print header sheets or outside work pallet labels with custom parameters."
