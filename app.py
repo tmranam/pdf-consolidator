@@ -1075,82 +1075,94 @@ elif st.session_state.current_page == "batches_and_labels":
                     "bold": master_lines[i]["bold"]
                 })
 
-            # Save sequential tracker step updates
+                        # Save sequential tracker step updates
             running_label_counter += int(b_labels_count)
 
-  st.divider()
+            # --- This block must break out of the batch loop but remain in the loop's parent tier ---
+            breaks_configs.append({
+                "count": int(b_labels_count),
+                "include_numbering": include_num,
+                "num_mode": r_num_mode,
+                "start_num": int(start_num),
+                "end_num": int(end_num),
+                "lines": b_final_lines,
+                "total_labels_global": int(b_labels_count)
+            })
 
-  col_qty1, col_qty2 = st.columns(2)
-  with col_qty1:
-    total_labels = st.number_input(
-      "Total Labels to Print:",
-      min_value=1,
-      max_value=10000,
-      value=14,
-      step=1,
-    )
-  with col_qty2:
-    include_num = st.checkbox(
-      "Include Sequential Label Count (e.g. '1 of 14')?",
-      value=True,
-    )
+        st.divider()
 
-  if st.button("Generate Imposed Labels PDF", type="primary"):
-    with st.spinner("Generating labels layout..."):
-      mm_to_pt = 2.83465
-      
-      # Safely handle session state resets from Streamlit clicks
-      if ('breaks_configs' not in locals()) or (not breaks_configs):
-        breaks_configs = [{
-          "count": int(total_labels) if 'total_labels' in locals() else 14,
-          "include_numbering": include_num if 'include_num' in locals() else True,
-          "num_mode": "Restart from new number",
-          "start_num": 1,
-          "end_num": int(total_labels) if 'total_labels' in locals() else 14,
-          "lines": lines_config if 'lines_config' in locals() else [],
-          "total_labels_global": int(total_labels) if 'total_labels' in locals() else 14
-        }]
+        col_qty1, col_qty2 = st.columns(2)
+        with col_qty1:
+            total_labels = st.number_input(
+                "Total Labels to Print:",
+                min_value=1,
+                max_value=10000,
+                value=14,
+                step=1,
+            )
+        with col_qty2:
+            include_num = st.checkbox(
+                "Include Sequential Label Count (e.g. '1 of 14')?",
+                value=True,
+            )
 
-      total_global_sum = sum(item.get("count", 0) for item in breaks_configs)
-      for item in breaks_configs:
-        if item.get("num_mode") == "Continue from previous batch":
-          item["total_labels_global"] = total_global_sum
+        if st.button("Generate Imposed Labels PDF", type="primary"):
+            with st.spinner("Generating labels layout..."):
+                mm_to_pt = 2.83465
+                
+                # Build default block properties if a dynamic page reload clears structural values
+                if ('breaks_configs' not in locals()) or (not breaks_configs):
+                    breaks_configs = [{
+                        "count": int(total_labels) if 'total_labels' in locals() else 14,
+                        "include_numbering": include_num if 'include_num' in locals() else True,
+                        "num_mode": "Restart from new number",
+                        "start_num": 1,
+                        "end_num": int(total_labels) if 'total_labels' in locals() else 14,
+                        "lines": lines_config if 'lines_config' in locals() else [],
+                        "total_labels_global": int(total_labels) if 'total_labels' in locals() else 14
+                    }]
 
-      active_lines = lines_config if 'lines_config' in locals() else []
-      active_num = include_num if 'include_num' in locals() else True
+                total_global_sum = sum(item.get("count", 0) for item in breaks_configs)
+                for item in breaks_configs:
+                    if item.get("num_mode") == "Continue from previous batch":
+                        item["total_labels_global"] = total_global_sum
 
-      pdf_buffer = create_labels_pdf(
-        rows=int(rows),
-        cols=int(cols),
-        label_w_pt=label_w_mm * mm_to_pt,
-        label_h_pt=label_h_mm * mm_to_pt,
-        gutter_x_pt=gutter_x_mm * mm_to_pt,
-        gutter_y_pt=gutter_y_mm * mm_to_pt,
-        margin_x_pt=margin_x_mm * mm_to_pt,
-        margin_y_pt=margin_y_mm * mm_to_pt,
-        lines_config=active_lines,
-        total_labels=int(total_global_sum),
-        include_numbering=active_num,
-        breaks_configs=breaks_configs,
-      )
+                active_lines = lines_config if 'lines_config' in locals() else []
+                active_num = include_num if 'include_num' in locals() else True
 
-      if hasattr(pdf_buffer, "getvalue"):
-        pdf_bytes = pdf_buffer.getvalue()
-      else:
-        pdf_bytes = pdf_buffer
+                pdf_buffer = create_labels_pdf(
+                    rows=int(rows),
+                    cols=int(cols),
+                    label_w_pt=label_w_mm * mm_to_pt,
+                    label_h_pt=label_h_mm * mm_to_pt,
+                    gutter_x_pt=gutter_x_mm * mm_to_pt,
+                    gutter_y_pt=gutter_y_mm * mm_to_pt,
+                    margin_x_pt=margin_x_mm * mm_to_pt,
+                    margin_y_pt=margin_y_mm * mm_to_pt,
+                    lines_config=active_lines,
+                    total_labels=int(total_global_sum),
+                    include_numbering=active_num,
+                    breaks_configs=breaks_configs,
+                )
 
-      out_filename = "Imposed_Labels_Output.pdf"
-      
-      if len(pdf_bytes) > 100:
-        st.success("Label sheet generated successfully!")
-        st.download_button(
-          label=f"⬇ Download {out_filename}",
-          data=pdf_bytes,
-          file_name=out_filename,
-          mime="application/pdf",
-        )
-      else:
-        st.error("Error: Generated PDF is empty. Check batch counts.")
+                if hasattr(pdf_buffer, "getvalue"):
+                    pdf_bytes = pdf_buffer.getvalue()
+                else:
+                    pdf_bytes = pdf_buffer
+
+                out_filename = "Imposed_Labels_Output.pdf"
+                
+                if len(pdf_bytes) > 100:
+                    st.success("Label sheet generated successfully!")
+                    st.download_button(
+                        label=f"⬇ Download {out_filename}",
+                        data=pdf_bytes,
+                        file_name=out_filename,
+                        mime="application/pdf",
+                    )
+                else:
+                    st.error("Error: Generated PDF is empty. Check batch counts.")
+
 # ---------------------------------------------------------
 # PAGE 5: GENERAL SETTINGS
 # ---------------------------------------------------------
