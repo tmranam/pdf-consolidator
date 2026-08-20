@@ -766,15 +766,20 @@ elif st.session_state.current_page == "batch_consolidator":
 elif st.session_state.current_page == "batches_and_labels":
     st.subheader("🏷️ Batches & Labels Dashboard")
 
-    sub_col1, sub_col2 = st.columns(2)
+    # Expand navigation to 3 distinct button panels
+    sub_col1, sub_col2, sub_col3 = st.columns(3)
     with sub_col1:
-        if st.button("🏷️ Batch Headers", use_container_width=True):
+        if st.button("🏷️ Batch Headers", use_container_width=True): 
             st.session_state.batches_subtab = "batch_headers"
     with sub_col2:
-        if st.button("🖨️ Print Labels", use_container_width=True):
+        if st.button("🖨️ Print Labels", use_container_width=True): 
             st.session_state.batches_subtab = "print_labels"
+    with sub_col3:
+        if st.button("📁 Print from File", use_container_width=True): 
+            st.session_state.batches_subtab = "print_from_file"
 
     st.divider()
+
 
     # --- SUBTAB 1: BATCH HEADERS ---
     if st.session_state.batches_subtab == "batch_headers":
@@ -1162,6 +1167,58 @@ elif st.session_state.current_page == "batches_and_labels":
                     )
                 else:
                     st.error("Error: Generated PDF is empty. Check batch counts.")
+    # --- EXPAND NAVIGATION HUB TO 3 DISTINCT PANEL COLUMNS ---
+    sub_col1, sub_col2, sub_col3 = st.columns(3)
+    with sub_col1:
+        if st.button("🏷️ Batch Headers", use_container_width=True): 
+            st.session_state.batches_subtab = "batch_headers"
+    with sub_col2:
+        if st.button("🖨️ Print Labels", use_container_width=True): 
+            st.session_state.batches_subtab = "print_labels"
+    with sub_col3:
+        if st.button("📁 Print from File", use_container_width=True): 
+            st.session_state.batches_subtab = "print_from_file"
+
+    st.divider()
+
+    # --- SUBTAB 3: PRINT FROM FILE & REPEAT OVERWRITES ---
+    if st.session_state.batches_subtab == "print_from_file":
+        st.markdown("### 📁 Print Labels From Data File")
+        st.write("Extract spreadsheet cell metrics dynamically onto standard A4 labels with custom constraints.")
+
+        # Core logic switch between parsing file records vs generating manual repeat labels
+        data_mode = st.radio(
+            "Select Processing Engine Mode:",
+            ["Use Excel Data Source File", "Repeat Manual Entry Override Mode"],
+            horizontal=True,
+            help="Excel mode reads your spreadsheet rows. Repeat Manual mode clones a single custom label completely N times."
+        )
+
+        df_labels = None
+        columns_list = []
+
+        if data_mode == "Use Excel Data Source File":
+            uploaded_data = st.file_uploader("Upload Excel Data Sheet", type=["xlsx", "xls"], key="label_data_uploader")
+            if uploaded_data:
+                df_labels = pd.read_excel(uploaded_data)
+                columns_list = [str(c) for c in df_labels.columns]
+                st.success(f"Successfully tracked data source file with **{len(df_labels)} rows** available.")
+        else:
+            st.info("Manual Clone Mode Active. Map your constant data items manually below.")
+
+        st.divider()
+        st.markdown("#### 1. Page Layout & Label Dimensions (mm)")
+        col_grid1, col_grid2 = st.columns(2)
+        with col_grid1:
+            rows = st.number_input("Rows per A4 Page:", min_value=1, max_value=20, value=7, key="file_rows")
+            cols = st.number_input("Columns per A4 Page:", min_value=1, max_value=10, value=2, key="file_cols")
+            label_w_mm = st.number_input("Label Width (mm):", min_value=10.0, value=99.1, key="file_w")
+            label_h_mm = st.number_input("Label Height (mm):", min_value=10.0, value=38.1, key="file_h")
+        with col_grid2:
+            gutter_x_mm = st.number_input("Horizontal Gutter (mm):", min_value=0.0, value=2.5, key="file_gx")
+            gutter_y_mm = st.number_input("Vertical Gutter (mm):", min_value=0.0, value=0.0, key="file_gy")
+            margin_x_mm = st.number_input("Page Side Margin (mm):", min_value=0.0, value=4.5, key="file_mx")
+            margin_y_mm = st.number_input("Page Top Margin (mm):", min_value=0.0, value=15.0, key="file_my")
 
 # ---------------------------------------------------------
 # PAGE 5: GENERAL SETTINGS
@@ -1170,3 +1227,136 @@ elif st.session_state.current_page == "general":
     st.subheader("⚙️ General Settings")
     st.write("Configure application parameters and system defaults.")
     st.info("System operational. All dependencies loaded.")
+        st.divider()
+        st.markdown("#### 2. Label Content Structure & Column Mapping Matrix")
+        num_lines = st.number_input("Number of Text Lines per Label:", min_value=1, max_value=10, value=2, key="file_num_lines")
+
+        line_mappings = []
+        for i in range(int(num_lines)):
+            st.markdown(f"**🖋️ Text Line Block Configuration #{i+1}**")
+            l_col1, l_col2, l_col3, l_col4 = st.columns([2, 3, 1, 1])
+            
+            with l_col1:
+                source_type = st.radio(
+                    f"Line {i+1} Data Source:",
+                    ["Manual Entry Only", "Excel Column Header Bind"],
+                    index=0 if data_mode == "Repeat Manual Entry Override Mode" else 1,
+                    disabled=(data_mode == "Repeat Manual Entry Override Mode"),
+                    key=f"src_type_{i}"
+                )
+            
+            with l_col2:
+                bound_col = None
+                manual_text = ""
+                if source_type == "Excel Column Header Bind" and columns_list:
+                    bound_col = st.selectbox(f"Bind Column Header:", columns_list, key=f"bind_col_{i}")
+                    manual_text = st.text_input(f"Append Prefix/Suffix Text:", value="", key=f"append_txt_{i}", help="Optional wording attached alongside data cell strings.")
+                else:
+                    manual_text = st.text_input(f"Enter Static Text String:", value=f"Sample Text {i+1}", key=f"manual_txt_{i}")
+            
+            with l_col3:
+                line_sz = st.number_input(f"Font Size:", min_value=6, max_value=72, value=12, key=f"file_sz_{i}")
+            with l_col4:
+                line_bld = st.checkbox("Bold Text", value=(i == 0), key=f"file_bld_{i}")
+                
+            line_mappings.append({
+                "type": source_type,
+                "column": bound_col,
+                "text": manual_text,
+                "font_size": line_sz,
+                "bold": line_bld
+            })
+
+        st.divider()
+        st.markdown("#### 3. Row Limit Strategy & Sequencing Safeguards")
+        
+        if data_mode == "Use Excel Data Source File":
+            row_strategy = st.radio("Rows Execution Scope Limits:", ["Process All Rows Found", "Limit to Specific Row Count Limit"], horizontal=True)
+            max_rows_to_process = len(df_labels) if df_labels is not None else 0
+            if row_strategy == "Limit to Specific Row Count Limit":
+                max_rows_to_process = st.number_input("Process up to how many spreadsheet data rows?", min_value=1, max_value=max(1, max_rows_to_process), value=min(10, max(1, max_rows_to_process)))
+        else:
+            total_clones_needed = st.number_input("Total Repeated Labels to Generate:", min_value=1, max_value=10000, value=30)
+
+        col_seq1, col_seq2, col_seq3 = st.columns(3)
+        with col_seq1:
+            append_sequence_counter = st.checkbox("Include Index Counter Footer? (e.g. '1 of 30')", value=False)
+        with col_seq2:
+            start_seq_num = st.number_input("Counter Start Index Overwrite:", min_value=1, value=1, disabled=not append_sequence_counter)
+        with col_seq3:
+            custom_denominator = st.checkbox("Use Custom Total Max Denominator Value?", value=False, disabled=not append_sequence_counter)
+            end_seq_num = st.number_input("Custom Denominator Limit Bounds Value:", min_value=1, value=30, disabled=(not append_sequence_counter or not custom_denominator))
+
+        # 4. Engine Processing Execution Block
+        if st.button("Generate Imposed Data Labels PDF", type="primary"):
+            if data_mode == "Use Excel Data Source File" and df_labels is None:
+                st.error("Error: Please upload a valid Excel control data file first.")
+            else:
+                with st.spinner("Compiling structural label fields layout page grids..."):
+                    processed_breaks_configs = []
+                    
+                    if data_mode == "Use Excel Data Source File":
+                        loop_range = int(max_rows_to_process)
+                        for r_idx in range(loop_range):
+                            row_data = df_labels.iloc[r_idx]
+                            row_lines = []
+                            for mapping in line_mappings:
+                                if mapping["type"] == "Excel Column Header Bind" and mapping["column"] is not None:
+                                    cell_val = row_data[mapping["column"]]
+                                    cell_str = "" if pd.isna(cell_val) else str(cell_val)
+                                    final_line_str = f"{mapping['text']} {cell_str}".strip() if mapping["text"] else cell_str
+                                else:
+                                    final_line_str = mapping["text"]
+                                    
+                                row_lines.append({
+                                    "text": final_line_str,
+                                    "font_size": mapping["font_size"],
+                                    "bold": mapping["bold"]
+                                })
+                            
+                            processed_breaks_configs.append({
+                                "count": 1,
+                                "include_numbering": append_sequence_counter,
+                                "num_mode": "Restart from new number" if custom_denominator else "Continue from previous batch",
+                                "start_num": int(start_seq_num + r_idx),
+                                "end_num": int(end_seq_num) if custom_denominator else int(loop_range),
+                                "lines": row_lines,
+                                "total_labels_global": int(loop_range)
+                            })
+                    else:
+                        clone_lines = []
+                        for mapping in line_mappings:
+                            clone_lines.append({
+                                "text": mapping["text"],
+                                "font_size": mapping["font_size"],
+                                "bold": mapping["bold"]
+                            })
+                        
+                        processed_breaks_configs.append({
+                            "count": int(total_clones_needed),
+                            "include_numbering": append_sequence_counter,
+                            "num_mode": "Restart from new number" if custom_denominator else "Continue from previous batch",
+                            "start_num": int(start_seq_num),
+                            "end_num": int(end_seq_num) if custom_denominator else int(total_clones_needed),
+                            "lines": clone_lines,
+                            "total_labels_global": int(total_clones_needed)
+                        })
+
+                    mm_to_pt = 2.83465
+                    total_calculated_sum = sum(item.get("count", 0) for item in processed_breaks_configs)
+                    
+                    pdf_buffer = create_labels_pdf(
+                        rows=int(rows), cols=int(cols),
+                        label_w_pt=label_w_mm * mm_to_pt, label_h_pt=label_h_mm * mm_to_pt,
+                        gutter_x_pt=gutter_x_mm * mm_to_pt, gutter_y_pt=gutter_y_mm * mm_to_pt,
+                        margin_x_pt=margin_x_mm * mm_to_pt, margin_y_pt=margin_y_mm * mm_to_pt,
+                        total_labels=int(total_calculated_sum), breaks_configs=processed_breaks_configs
+                    )
+
+                    pdf_bytes = pdf_buffer.getvalue() if hasattr(pdf_buffer, "getvalue") else pdf_buffer
+                    
+                    if len(pdf_bytes) > 100:
+                        st.success(f"Successfully generated **{total_calculated_sum} labels**!")
+                        st.download_button(label="⬇ Download Imposed_Data_Labels_Output.pdf", data=pdf_bytes, file_name="Imposed_Data_Labels_Output.pdf", mime="application/pdf")
+                    else:
+                        st.error("Error generating label document matrix. Review parameters.")
