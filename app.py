@@ -1279,7 +1279,7 @@ elif st.session_state.current_page == "batches_and_labels":
             custom_denominator = st.checkbox("Use Custom Total Max Denominator Value?", value=False, disabled=not append_sequence_counter)
             end_seq_num = st.number_input("Custom Denominator Limit Bounds Value:", min_value=1, value=30, disabled=(not append_sequence_counter or not custom_denominator))
 
-        # 4. Engine Processing Execution Block
+               # 4. Engine Processing Execution Block
         if st.button("Generate Imposed Data Labels PDF", type="primary"):
             if data_mode == "Use Excel Data Source File" and df_labels is None:
                 st.error("Error: Please upload a valid Excel control data file first.")
@@ -1287,6 +1287,17 @@ elif st.session_state.current_page == "batches_and_labels":
                 with st.spinner("Compiling structural label fields layout page grids..."):
                     processed_breaks_configs = []
                     
+                    # --- SAFE FALLBACK ENGINE CHECK ---
+                    # Ensures variables exist even if layout blocks didn't render completely
+                    safe_rows = int(rows) if 'rows' in locals() and rows else 7
+                    safe_cols = int(cols) if 'cols' in locals() and cols else 2
+                    safe_w = float(label_w_mm) if 'label_w_mm' in locals() and label_w_mm else 99.1
+                    safe_h = float(label_h_mm) if 'label_h_mm' in locals() and label_h_mm else 38.1
+                    safe_gx = float(gutter_x_mm) if 'gutter_x_mm' in locals() and gutter_x_mm else 2.5
+                    safe_gy = float(gutter_y_mm) if 'gutter_y_mm' in locals() and gutter_y_mm else 0.0
+                    safe_mx = float(margin_x_mm) if 'margin_x_mm' in locals() and margin_x_mm else 4.5
+                    safe_my = float(margin_y_mm) if 'margin_y_mm' in locals() and margin_y_mm else 15.0
+
                     if data_mode == "Use Excel Data Source File":
                         loop_range = int(max_rows_to_process)
                         for r_idx in range(loop_range):
@@ -1337,12 +1348,18 @@ elif st.session_state.current_page == "batches_and_labels":
                     mm_to_pt = 2.83465
                     total_calculated_sum = sum(item.get("count", 0) for item in processed_breaks_configs)
                     
+                    # --- UPDATED GENERATOR FUNCTION TO USE SAFE VARIABLES ---
                     pdf_buffer = create_labels_pdf(
-                        rows=int(rows), cols=int(cols),
-                        label_w_pt=label_w_mm * mm_to_pt, label_h_pt=label_h_mm * mm_to_pt,
-                        gutter_x_pt=gutter_x_mm * mm_to_pt, gutter_y_pt=gutter_y_mm * mm_to_pt,
-                        margin_x_pt=margin_x_mm * mm_to_pt, margin_y_pt=margin_y_mm * mm_to_pt,
-                        total_labels=int(total_calculated_sum), breaks_configs=processed_breaks_configs
+                        rows=safe_rows, 
+                        cols=safe_cols,
+                        label_w_pt=safe_w * mm_to_pt, 
+                        label_h_pt=safe_h * mm_to_pt,
+                        gutter_x_pt=safe_gx * mm_to_pt, 
+                        gutter_y_pt=safe_gy * mm_to_pt,
+                        margin_x_pt=safe_mx * mm_to_pt, 
+                        margin_y_pt=safe_my * mm_to_pt,
+                        total_labels=int(total_calculated_sum), 
+                        breaks_configs=processed_breaks_configs
                     )
 
                     pdf_bytes = pdf_buffer.getvalue() if hasattr(pdf_buffer, "getvalue") else pdf_buffer
@@ -1352,6 +1369,7 @@ elif st.session_state.current_page == "batches_and_labels":
                         st.download_button(label="⬇ Download Imposed_Data_Labels_Output.pdf", data=pdf_bytes, file_name="Imposed_Data_Labels_Output.pdf", mime="application/pdf")
                     else:
                         st.error("Error generating label document matrix. Review parameters.")
+
 # ---------------------------------------------------------
 # PAGE 5: GENERAL SETTINGS
 # ---------------------------------------------------------
