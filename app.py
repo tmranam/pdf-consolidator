@@ -383,7 +383,7 @@ def create_labels_pdf(
     packet.seek(0)
     return packet
 
-# Helper function for dynamic PDF imposition engine
+# Helper function for dynamic PDF imposition engine (Fixed for modern pypdf)
 def execute_pdf_imposition(input_bytes, config):
     import math
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
@@ -424,7 +424,8 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 if input_page_idx >= total_input_pages:
                     continue
-                    
+                
+                # Fetch a clean page object clone out of source layout index references
                 input_page = reader.pages[input_page_idx]
                 
                 # Flip X-axis positions for back-page alignment on duplex templates
@@ -446,8 +447,11 @@ def execute_pdf_imposition(input_bytes, config):
                 tx = x_pos - config['bleed'] + (target_w - (orig_w * scale)) / 2
                 ty = y_pos - config['bleed'] + (target_h - (orig_h * scale)) / 2
                 
+                # --- FIXED PYPDF WORKFLOW MATRIX PATHWAY ---
+                # Build transformation logic, apply to incoming page, then merge flat
                 transform = Transformation().scale(scale, scale).translate(tx, ty)
-                sheet.merge_page(input_page, transformation=transform, over=True)
+                input_page.add_transformation(transform)
+                sheet.merge_page(input_page, over=True)
                 
         writer.add_page(sheet)
         
@@ -486,10 +490,7 @@ with col5:
 st.divider()
 
 # ---------------------------------------------------------
-# PAGE 1: IMPOSE
-# ---------------------------------------------------------
-# ---------------------------------------------------------
-# PAGE 1: IMPOSE (REPLACED PLACEHOLDER WITH ACTIVE ENGINE UI)
+# PAGE 1: IMPOSE (REPLACED PLACEHOLDER WITH FIXED ENGINE & VARIABLE MEDIA SIZES)
 # ---------------------------------------------------------
 if st.session_state.current_page == "impose":
     st.subheader("📐 PDF Impose Layout Engine")
@@ -504,7 +505,12 @@ if st.session_state.current_page == "impose":
     col_imp1, col_imp2 = st.columns(2)
     
     with col_imp1:
-        media_choice = st.selectbox("Output Media Sheet Size:", ["A4", "Letter", "A3"], index=0)
+        # Replaced locked dropdown choice matrix with fully custom sizing variables
+        st.markdown("**Output Media Sheet Footprint (mm):**")
+        media_w_mm = st.number_input("Custom Sheet Width (mm):", min_value=50.0, max_value=2000.0, value=210.0, step=1.0)
+        media_h_mm = st.number_input("Custom Sheet Height (mm):", min_value=50.0, max_value=2000.0, value=297.0, step=1.0)
+        
+        st.write("---")
         print_style = st.radio("Output Surface Type:", ["Simplex", "Duplex"], horizontal=True)
         layout_choice = st.radio("Step Sequencing Route Pattern:", ["Repeat / Step & Repeat", "Cut and Stack"], horizontal=False)
 
@@ -527,14 +533,10 @@ if st.session_state.current_page == "impose":
                     # Conversion baseline ratio: 1 millimeter = 2.83465 PostScript desktop points
                     MM_TO_PT = 2.83465
                     
-                    # Target layout envelope presets
-                    size_map = {"A4": (595.27, 841.89), "Letter": (612.0, 792.0), "A3": (841.89, 1190.55)}
-                    chosen_w, chosen_h = size_map.get(media_choice, (595.27, 841.89))
-                    
-                    # Generate dynamic configuration mapping dictionary parameters
+                    # Generate dynamic configuration mapping dictionary parameters using custom dimensions
                     imposition_runtime_config = {
-                        'media_w': chosen_w,
-                        'media_h': chosen_h,
+                        'media_w': media_w_mm * MM_TO_PT,
+                        'media_h': media_h_mm * MM_TO_PT,
                         'trim_w': trim_w * MM_TO_PT,
                         'trim_h': trim_h * MM_TO_PT,
                         'bleed': bleed_w * MM_TO_PT,
@@ -565,6 +567,7 @@ if st.session_state.current_page == "impose":
                     )
                 except Exception as ex_err:
                     st.error(f"An unexpected failure sequence broke the layout engine logic block execution path: {str(ex_err)}")
+
 
 # ---------------------------------------------------------
 # PAGE 2: DUPLICATE PAGES
