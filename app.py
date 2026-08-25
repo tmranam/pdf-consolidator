@@ -387,6 +387,7 @@ def create_labels_pdf(
 def execute_pdf_imposition(input_bytes, config):
     import math
     import io
+    import copy
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
     from reportlab.pdfgen import canvas
     
@@ -500,8 +501,8 @@ def execute_pdf_imposition(input_bytes, config):
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
                 
-                temp_page = PageObject.create_blank_page(width=orig_w, height=orig_h)
-                temp_page.merge_page(input_page, over=True)
+                # --- FIX: Shallow copy the page object directly to prevent boundary clipping ---
+                temp_page = copy.copy(input_page)
                 
                 target_w = config['trim_w'] + (2 * config['bleed'])
                 target_h = config['trim_h'] + (2 * config['bleed'])
@@ -574,6 +575,7 @@ def execute_pdf_imposition(input_bytes, config):
     output_stream = io.BytesIO()
     writer.write(output_stream)
     return output_stream.getvalue(), ups_per_page, round(last_computed_scale * 100.0, 1)
+
 
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
