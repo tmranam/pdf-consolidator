@@ -383,10 +383,11 @@ def create_labels_pdf(
     packet.seek(0)
     return packet
 
-# Helper function for dynamic PDF imposition engine (Fixed page-cloning mutation bug)
+# Helper function for dynamic PDF imposition engine (With Auto-Bleed Shift Trim Marks)
 def execute_pdf_imposition(input_bytes, config):
     import math
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
+    from reportlab.pdfgen import canvas
     
     reader = PdfReader(io.BytesIO(input_bytes))
     
@@ -415,7 +416,7 @@ def execute_pdf_imposition(input_bytes, config):
     # Calculate total required physical sheets
     total_sheets = math.ceil(total_input_pages / ups_per_page)
     if config['duplex'] and total_sheets % 2 != 0:
-        total_sheets += 1  # Ensure even pairs for double-sided backups
+        total_sheets += 1
 
     writer = PdfWriter()
     
@@ -423,18 +424,24 @@ def execute_pdf_imposition(input_bytes, config):
         sheet = PageObject.create_blank_page(width=config['media_w'], height=config['media_h'])
         is_back_page = config['duplex'] and (sheet_idx % 2 == 1)
         
+        # Prepare a transparent ReportLab canvas overlay for Trim Marks on this sheet
+        mark_packet = io.BytesIO()
+        mark_can = canvas.Canvas(mark_packet, pagesize=(config['media_w'], config['media_h']))
+        mark_can.setStrokeColorRGB(0, 0, 0) # Registration Black cut lines
+        mark_can.setLineWidth(0.5)          # Hairline weight
+        
+        draw_marks = config.get('trim_marks', False)
+        
         for r in range(rows):
             for c in range(cols):
-                # Apply layout matrix sorting routes
                 if config['layout_mode'] == "Cut and Stack":
                     input_page_idx = sheet_idx + (r * cols + c) * total_sheets
-                else:  # Standard Step & Repeat
+                else:
                     input_page_idx = (sheet_idx * ups_per_page) + (r * cols + c)
                 
                 if input_page_idx >= total_input_pages:
                     continue
                 
-                # Fetch page out of our virtual cloned pool
                 input_page = virtual_page_pool[input_page_idx]
                 
                 # Flip X-axis positions for back-page alignment on duplex templates
@@ -446,11 +453,10 @@ def execute_pdf_imposition(input_bytes, config):
                     
                 y_pos = config['media_h'] - config['margins']['top'] - (r * step_y) - config['trim_h']
                 
-                # Check dimensions of the original design page
+                # --- PROCESS PLACEMENT AND BLEED SCALING ---
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
                 
-                # --- FIX: Create an isolated temporary page to break object reference links ---
                 temp_page = PageObject.create_blank_page(width=orig_w, height=orig_h)
                 temp_page.merge_page(input_page, over=True)
                 
@@ -461,16 +467,48 @@ def execute_pdf_imposition(input_bytes, config):
                 tx = x_pos - config['bleed'] + (target_w - (orig_w * scale)) / 2
                 ty = y_pos - config['bleed'] + (target_h - (orig_h * scale)) / 2
                 
-                # Apply transformation safely to the temporary object container, then merge
                 transform = Transformation().scale(scale, scale).translate(tx, ty)
                 temp_page.add_transformation(transform)
                 sheet.merge_page(temp_page, over=True)
                 
+                # --- GENERATE PHYSICAL TRIM MARKS OUTSIDE BLEED BOUNDS ---
+                if draw_marks:
+                    # Clear lines 12pt (~4mm) long, offset 3pt from the edge of the bleed
+                    mark_len = 12.0
+                    offset = config['bleed'] + 3.0
+                    
+                    x1, x2 = x_pos, x_pos + config['trim_w']
+                    y1, y2 = y_pos, y_pos + config['trim_h']
+                    
+                    # Top-Left Mark
+                    mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)
+                    mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)
+                    
+                    # Top-Right Mark
+                    mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)
+                    mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)
+                    
+                    # Bottom-Left Mark
+                    mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)
+                    mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)
+                    
+                    # Bottom-Right Mark
+                    mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
+                    mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
+                    
+        # Commit vector strokes and merge overlay over the sheet
+        mark_can.save()
+        mark_packet.seek(0)
+        mark_reader = PdfReader(mark_packet)
+        if len(mark_reader.pages) > 0:
+            sheet.merge_page(mark_reader.pages[0], over=True)
+            
         writer.add_page(sheet)
         
     output_stream = io.BytesIO()
     writer.write(output_stream)
     return output_stream.getvalue(), ups_per_page
+
 
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
@@ -503,7 +541,7 @@ with col5:
 st.divider()
 
 # ---------------------------------------------------------
-# PAGE 1: IMPOSE (UPDATED WITH REPEAT COUNT MULTIPLIER AND VARIABLE MEDIA SIZES)
+# PAGE 1: IMPOSE (UPDATED WITH REPEAT COUNT MULTIPLIER AND AUTO-BLEED TRIM MARKS)
 # ---------------------------------------------------------
 if st.session_state.current_page == "impose":
     st.subheader("📐 PDF Impose Layout Engine")
@@ -523,7 +561,6 @@ if st.session_state.current_page == "impose":
         media_h_mm = st.number_input("Custom Sheet Height (mm):", min_value=50.0, max_value=2000.0, value=297.0, step=1.0)
         
         st.write("---")
-        # NEW WIDGET: Controls the step replication multiplier matrix logic loop
         repeat_per_page = st.number_input("How many up? (Repeats per design page):", min_value=1, max_value=1000, value=4, step=1)
         print_style = st.radio("Output Surface Type:", ["Simplex", "Duplex"], horizontal=True)
         layout_choice = st.radio("Step Sequencing Route Pattern:", ["Repeat / Step & Repeat", "Cut and Stack"], horizontal=False)
@@ -534,6 +571,10 @@ if st.session_state.current_page == "impose":
         bleed_w = st.number_input("Bleed Envelope Margin (mm):", min_value=0.0, max_value=25.0, value=2.0, step=0.5)
         gut_x = st.number_input("Horizontal Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
         gut_y = st.number_input("Vertical Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+        
+        st.write("---")
+        # NEW WIDGET: Option checkbox to toggle trim line assets
+        add_trim_marks = st.checkbox("Draw Production Trim Marks?", value=True, help="Draws vector hairlines outside your bleed box showing where the machine cutting blades must strike.")
 
     st.divider()
 
@@ -557,10 +598,11 @@ if st.session_state.current_page == "impose":
                         'gutter_x': gut_x * MM_TO_PT,
                         'gutter_y': gut_y * MM_TO_PT,
                         # Margins inside outer sheet edges to accommodate printer clamp limitations
-                        'margins': {'top': 20.0, 'bottom': 20.0, 'left': 20.0, 'right': 20.0},
+                        'margins': {'top': 25.0, 'bottom': 25.0, 'left': 25.0, 'right': 25.0},
                         'layout_mode': layout_choice,
                         'duplex': (print_style == "Duplex"),
-                        'repeat_per_page': int(repeat_per_page) # Passed straight into cloning pool loop
+                        'repeat_per_page': int(repeat_per_page),
+                        'trim_marks': add_trim_marks # Value passed to engine
                     }
                     
                     # Extract binary payload array values out of file uploader session memory
@@ -569,7 +611,7 @@ if st.session_state.current_page == "impose":
                     # Process file layout allocations
                     compiled_output_pdf, total_calculated_ups = execute_pdf_imposition(raw_input_bytes, imposition_runtime_config)
                     
-                    st.success(f"🎉 Imposition Matrix Calculated Successfully! Fitted up to **{total_calculated_ups} rows/columns** across print signature layouts.")
+                    st.success(f"🎉 Imposition Matrix Calculated Successfully! Arranged your multi-up sheet sequence.")
                     
                     # Display production file download stream pipeline action widget
                     base_name = os.path.splitext(uploaded_impose_pdf.name)[0]
@@ -582,7 +624,6 @@ if st.session_state.current_page == "impose":
                     )
                 except Exception as ex_err:
                     st.error(f"An unexpected failure sequence broke the layout engine logic block execution path: {str(ex_err)}")
-
 
 # ---------------------------------------------------------
 # PAGE 2: DUPLICATE PAGES
