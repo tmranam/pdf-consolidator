@@ -581,7 +581,7 @@ with col5:
 st.divider()
 
 # ---------------------------------------------------------
-# PAGE 1: IMPOSE (UPDATED WITH REAL-TIME SYSTEM ENGINE SCALE FEEDBACK METRICS)
+# PAGE 1: IMPOSE (FIXED INTERFACE BUTTON & ST.RERUN BUGS)
 # ---------------------------------------------------------
 if st.session_state.current_page == "impose":
     st.subheader("📐 PDF Impose Layout Engine")
@@ -680,17 +680,19 @@ if st.session_state.current_page == "impose":
                     # Unpack output values, capturing the calculated scale percentage
                     compiled_output_pdf, total_calculated_ups, computed_percentage = execute_pdf_imposition(raw_input_bytes, imposition_runtime_config)
                     
-                    # Store computed values in session state and reload view components
+                    # Store computed values securely in session state background memory
                     st.session_state.system_auto_scale_feedback = computed_percentage
                     
-                    st.success(f"🎉 Imposition Matrix Calculated Successfully! Arranged your multi-up sheet sequence.")
+                    st.success(f"🎉 Imposition Matrix Calculated Successfully!")
                     
                     # Display real-time conversion summary messages
                     if fit_to_size_option:
                         st.info(f"📊 **Auto-Fit Metric:** Source artwork was automatically scaled to **{computed_percentage}%** of its original size to fit the requested trim window bounds.")
                     
+                    # FIXED: Added explicit [0] split indexing to prevent type string interpolation errors
+                    base_name = os.path.splitext(uploaded_impose_pdf.name)[0]
+                    
                     # Display production file download stream pipeline action widget
-                    base_name = os.path.splitext(uploaded_impose_pdf.name)
                     st.download_button(
                         label=f"⬇️ Download Imposed Output File",
                         data=compiled_output_pdf,
@@ -699,11 +701,9 @@ if st.session_state.current_page == "impose":
                         use_container_width=True
                     )
                     
-                    # Triggers a rerun so the disabled text box updates with the calculated percentage value immediately
-                    st.rerun()
-                    
                 except Exception as ex_err:
                     st.error(f"An unexpected failure sequence broke the layout engine logic block execution path: {str(ex_err)}")
+
 
 # ---------------------------------------------------------
 # PAGE 2: DUPLICATE PAGES
