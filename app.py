@@ -573,9 +573,6 @@ def execute_pdf_imposition(input_bytes, config):
     writer.write(output_stream)
     return output_stream.getvalue(), ups_per_page, round(last_computed_scale * 100.0, 1)
 
-# ---------------------------------------------------------
-# PAGE 1: IMPOSE (COMPLETE WORKSPACE INTERFACE BLOCK)
-# ---------------------------------------------------------
 if st.session_state.current_page == "impose":
     st.subheader("📐 PDF Impose Layout Engine")
     st.write("Upload source materials to impose, scale, and arrange pages for high-volume production presses.")
@@ -583,7 +580,6 @@ if st.session_state.current_page == "impose":
     if "system_auto_scale_feedback" not in st.session_state:
         st.session_state.system_auto_scale_feedback = 100.0
 
-    # 1. Primary Work File Dropzone
     uploaded_impose_pdf = st.file_uploader("Upload Target PDF File to Impose", type=["pdf"], key="impose_file_uploader")
     st.divider()
     
@@ -594,7 +590,6 @@ if st.session_state.current_page == "impose":
         st.markdown("**Output Media Sheet Footprint (mm):**")
         media_w_mm = st.number_input("Custom Sheet Width (mm):", min_value=50.0, max_value=2000.0, value=210.0, step=1.0)
         media_h_mm = st.number_input("Custom Sheet Height (mm):", min_value=50.0, max_value=2000.0, value=297.0, step=1.0)
-        
         st.write("---")
         repeat_per_page = st.number_input("How many up? (Repeats per design page):", min_value=1, max_value=1000, value=4, step=1)
         print_style = st.radio("Output Surface Type:", ["Simplex", "Duplex"], horizontal=True)
@@ -606,79 +601,209 @@ if st.session_state.current_page == "impose":
         bleed_w = st.number_input("Bleed Envelope Margin (mm):", min_value=0.0, max_value=25.0, value=2.0, step=0.5)
         gut_x = st.number_input("Horizontal Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
         gut_y = st.number_input("Vertical Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
-        
         st.write("---")
-        fit_to_size_option = st.checkbox("Auto-Fit Content to Selected Trim Box?", value=True, help="When checked, automatically scales your design up or down to lock onto the trim size boundaries perfectly.")
+        fit_to_size_option = st.checkbox("Auto-Fit Content to Selected Trim Box?", value=True)
         
         if fit_to_size_option:
-            magnification_pct = st.number_input(
-                f"Artwork Magnification Scale (%):", 
-                min_value=10.0, max_value=200.0, 
-                value=float(st.session_state.system_auto_scale_feedback), 
-                step=1.0, disabled=True, 
-                help="Showing the calculated scale ratio performed by the Auto-Fit layout machine framework."
-            )
+            magnification_pct = st.number_input(f"Artwork Magnification Scale (%):", min_value=10.0, max_value=200.0, value=float(st.session_state.system_auto_scale_feedback), step=1.0, disabled=True)
         else:
-            magnification_pct = st.number_input(
-                "Artwork Magnification Scale (%):", 
-                min_value=10.0, max_value=200.0, 
-                value=98.0, step=1.0, 
-                help="Type any precise manual percentage scale constraint layout size rule."
-            )
+            magnification_pct = st.number_input("Artwork Magnification Scale (%):", min_value=10.0, max_value=200.0, value=98.0, step=1.0)
             
-        trim_style_selection = st.selectbox(
-            "Select Trim Marks Option style:",
-            ["Outer Perimeter Only", "All Individual Items", "None"],
-            index=0,
-            help="Outer Perimeter Only ensures that no marks cut into the middle of the sheet or cross over adjacent artwork cells."
-        )
+        trim_style_selection = st.selectbox("Select Trim Marks Option style:", ["Outer Perimeter Only", "All Individual Items", "None"], index=0)
 
     st.divider()
 
-    # Form Submission Trigger Action Button Hook
     if st.button("Run Sheet Imposition Processing", type="primary", use_container_width=True):
         if not uploaded_impose_pdf:
             st.error("⚠️ Active source PDF file stream data must be staged before layout processing.")
         else:
             with st.spinner("Calculating layout transformations and packing pages..."):
                 try:
+                    import math
+                    from pypdf import PdfReader, PdfWriter, PageObject, Transformation
+                    from reportlab.pdfgen import canvas
+
+                    reader = PdfReader(io.BytesIO(uploaded_impose_pdf.read()))
+                    original_pages = list(reader.pages)
+                    total_original_pages = len(original_pages)
+                    
                     MM_TO_PT = 2.83465
-                    imposition_runtime_config = {
-                        'media_w': media_w_mm * MM_TO_PT,
-                        'media_h': media_h_mm * MM_TO_PT,
-                        'trim_w': trim_w * MM_TO_PT,
-                        'trim_h': trim_h * MM_TO_PT,
-                        'bleed': bleed_w * MM_TO_PT,
-                        'gutter_x': gut_x * MM_TO_PT,
-                        'gutter_y': gut_y * MM_TO_PT,
-                        'margins': {'top': 25.0, 'bottom': 25.0, 'left': 25.0, 'right': 25.0},
-                        'layout_mode': layout_choice,
-                        'duplex': (print_style == "Duplex"),
-                        'repeat_per_page': int(repeat_per_page),
-                        'trim_marks_style': trim_style_selection,
-                        'fit_to_size': fit_to_size_option,
-                        'magnification_pct': float(magnification_pct) 
-                    }
+                    mw, mh = media_w_mm * MM_TO_PT, media_h_mm * MM_TO_PT
+                    tw, th = trim_w * MM_TO_PT, trim_h * MM_TO_PT
+                    bl = bleed_w * MM_TO_PT
+                    gx, gy = gut_x * MM_TO_PT, gut_y * MM_TO_PT
+                    margins = {'top': 25.0, 'bottom': 25.0, 'left': 25.0, 'right': 25.0}
+
+                    avail_w = mw - margins['left'] - margins['right']
+                    avail_h = mh - margins['top'] - margins['bottom']
+                    step_x, step_y = tw + gx, th + gy
                     
-                    raw_input_bytes = uploaded_impose_pdf.read()
-                    compiled_output_pdf, total_calculated_ups, computed_percentage = execute_pdf_imposition(raw_input_bytes, imposition_runtime_config)
+                    cols = max(1, int((avail_w + gx) / step_x))
+                    rows = max(1, int((avail_h + gy) / step_y))
+                    ups_per_page = cols * rows
                     
-                    st.session_state.system_auto_scale_feedback = computed_percentage
-                    st.success(f"🎉 Imposition Matrix Calculated Successfully!")
+                    is_duplex = (print_style == "Duplex")
+
+                    if "Cut and Stack" in layout_choice:
+                        stack_depth = math.ceil(total_original_pages / ups_per_page)
+                        if is_duplex and (stack_depth % 2 != 0):
+                            stack_depth += 1
+                        total_sheets = stack_depth
+                        total_stack_layers = total_sheets // 2 if is_duplex else total_sheets
+                    else:
+                        sheets_per_original_page = math.ceil(repeat_per_page / ups_per_page)
+                        if is_duplex and (sheets_per_original_page % 2 != 0):
+                            sheets_per_original_page += 1
+                        total_sheets = total_original_pages * sheets_per_original_page
+
+                    pdf_writer = PdfWriter()
+                    mag_factor = float(magnification_pct) / 100.0
+                    last_computed_scale = 1.0
+                    
+                    for sheet_idx in range(total_sheets):
+                        sheet = PageObject.create_blank_page(width=mw, height=mh)
+                        is_back_page = is_duplex and (sheet_idx % 2 == 1)
+                        
+                        mark_packet = io.BytesIO()
+                        mark_can = canvas.Canvas(mark_packet, pagesize=(mw, mh))
+                        mark_can.setStrokeColorRGB(0, 0, 0)
+                        mark_can.setLineWidth(0.5)
+                        
+                        for r in range(rows):
+                            for c in range(cols):
+                                input_page = None
+                                
+                                if "Cut and Stack" in layout_choice:
+                                    current_stack_layer = (sheet_idx // 2) if is_duplex else sheet_idx
+                                    grid_position_idx = (r * cols) + c
+                                    if is_duplex:
+                                        if is_back_page:
+                                            grid_position_idx = (r * cols) + (cols - 1 - c)
+                                            virtual_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2) + 1
+                                        else:
+                                            virtual_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2)
+                                    else:
+                                        virtual_idx = (grid_position_idx * total_stack_layers) + current_stack_layer
+                                        
+                                    if virtual_idx < total_original_pages:
+                                        input_page = original_pages[virtual_idx]
+                                else:
+                                    sheets_per_group = total_sheets // total_original_pages
+                                    orig_target_idx = sheet_idx // sheets_per_group
+                                    local_offset = sheet_idx % sheets_per_group
+                                    if is_duplex:
+                                        local_layer = local_offset // 2
+                                        grid_position_idx = (r * cols) + c
+                                        if is_back_page:
+                                            grid_position_idx = (r * cols) + (cols - 1 - c)
+                                            virtual_repeat_idx = (local_layer * ups_per_page * 2) + (grid_position_idx * 2) + 1
+                                        else:
+                                            virtual_repeat_idx = (local_layer * ups_per_page * 2) + (grid_position_idx * 2)
+                                    else:
+                                        virtual_repeat_idx = (local_offset * ups_per_page) + (r * cols) + c
+                                        
+                                    if virtual_repeat_idx < repeat_per_page and orig_target_idx < total_original_pages:
+                                        input_page = original_pages[orig_target_idx]
+                                
+                                if input_page is None:
+                                    continue
+                                    
+                                if is_back_page:
+                                    x_pos = mw - margins['right'] - ((cols - 1 - c) * step_x) - tw
+                                else:
+                                    x_pos = margins['left'] + (c * step_x)
+                                y_pos = mh - margins['top'] - (r * step_y) - th
+                                
+                                orig_w = float(input_page.mediabox.width)
+                                orig_h = float(input_page.mediabox.height)
+                                
+                                temp_page = PageObject.create_blank_page(width=orig_w, height=orig_h)
+                                temp_page.merge_page(input_page, over=True)
+                                
+                                target_w, target_h = tw + (2 * bl), th + (2 * bl)
+                                scale = min(target_w / orig_w, target_h / orig_h) if fit_to_size_option else (1.0 * mag_factor)
+                                last_computed_scale = scale
+                                
+                                tx = x_pos - bl + (target_w - (orig_w * scale)) / 2
+                                ty = y_pos - bl + (target_h - (orig_h * scale)) / 2
+                                
+                                transform = Transformation().scale(scale, scale).translate(tx, ty)
+                                temp_page.add_transformation(transform)
+                                sheet.merge_page(temp_page, over=True)
+                                                                # --- TRIM MARK LOGIC VECTOR GENERATOR ---
+                                if trim_style_selection != "None":
+                                    mark_len, offset = 12.0, bl + 3.0
+                                    x1, x2 = x_pos, x_pos + tw
+                                    y1, y2 = y_pos, y_pos + th
+                                    
+                                    is_left = (c == 0) if not is_back_page else (c == cols - 1)
+                                    is_right = (c == cols - 1) if not is_back_page else (c == 0)
+                                    is_top, is_bottom = (r == 0), (r == rows - 1)
+                                    draw_all = (trim_style_selection == "All Individual Items")
+                                    
+                                    # Top-Left Crop Marks
+                                    if draw_all or (is_left and is_top):
+                                        mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)
+                                        mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)
+                                    elif trim_style_selection == "Outer Perimeter Only":
+                                        if is_top: mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)
+                                        if is_left: mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)
+                                        
+                                    # Top-Right Crop Marks
+                                    if draw_all or (is_right and is_top):
+                                        mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)
+                                        mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)
+                                    elif trim_style_selection == "Outer Perimeter Only":
+                                        if is_top: mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)
+                                        if is_right: mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)
+                                        
+                                    # Bottom-Left Crop Marks
+                                    if draw_all or (is_left and is_bottom):
+                                        mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)
+                                        mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)
+                                    elif trim_style_selection == "Outer Perimeter Only":
+                                        if is_bottom: mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)
+                                        if is_left: mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)
+                                        
+                                    # Bottom-Right Crop Marks
+                                    if draw_all or (is_right and is_bottom):
+                                        mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
+                                        mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
+                                    elif trim_style_selection == "Outer Perimeter Only":
+                                        if is_bottom: mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
+                                        if is_right: mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
+                                        
+                        # --- SHEET LAYER COMPILATION TERMINATION ---
+                        mark_can.save()
+                        mark_packet.seek(0)
+                        mark_reader = PdfReader(mark_packet)
+                        if len(mark_reader.pages) > 0:
+                            sheet.merge_page(mark_reader.pages[0], over=True)
+                            
+                        pdf_writer.add_page(sheet)
+                        
+                    # --- STREAM STREAMING & UI SELECTION REDIRECTS ---
+                    output_stream = io.BytesIO()
+                    pdf_writer.write(output_stream)
+                    final_bytes = output_stream.getvalue()
+                    
+                    st.session_state.system_auto_scale_feedback = round(last_computed_scale * 100.0, 1)
+                    st.success("🎉 Imposition Matrix Calculated Successfully!")
                     
                     if fit_to_size_option:
-                        st.info(f"📊 **Auto-Fit Metric:** Source artwork was automatically scaled to **{computed_percentage}%** of its original size to fit the requested trim window bounds.")
-                    
+                        st.info(f"📊 Auto-Fit Metric: Artwork scaled to {st.session_state.system_auto_scale_feedback}% of original size.")
+                        
                     base_name = os.path.splitext(uploaded_impose_pdf.name)[0]
                     st.download_button(
-                        label=f"⬇️ Download Imposed Output File",
-                        data=compiled_output_pdf,
-                        file_name=f"{base_name}_Imposed_{repeat_per_page}Up.pdf",
+                        label="⬇️ Download Imposed Output File",
+                        data=final_bytes,
+                        file_name=f"{base_name}_Imposed.pdf",
                         mime="application/pdf",
                         use_container_width=True
                     )
                 except Exception as ex_err:
-                    st.error(f"An unexpected failure sequence broke the layout engine logic block execution path: {str(ex_err)}")
+                    st.error(f"An unexpected failure sequence occurred: {str(ex_err)}")
+
 
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
