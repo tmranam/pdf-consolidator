@@ -486,7 +486,8 @@ def execute_pdf_imposition(input_bytes, config):
                 if input_page_idx >= total_input_pages:
                     continue
                 
-                input_page = page_pool[input_page_idx]
+                # --- FIX: Deep copy the item straight out of the pool to block shared references ---
+                input_page = copy.deepcopy(page_pool[input_page_idx])
                 
                 # Flip X-axis positions for back-page alignment on duplex templates
                 if is_back_page:
@@ -500,9 +501,6 @@ def execute_pdf_imposition(input_bytes, config):
                 # Process placement and bleed scaling securely
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
-                
-                # --- FIX: Shallow copy the page object directly to prevent boundary clipping ---
-                temp_page = copy.copy(input_page)
                 
                 target_w = config['trim_w'] + (2 * config['bleed'])
                 target_h = config['trim_h'] + (2 * config['bleed'])
@@ -518,8 +516,8 @@ def execute_pdf_imposition(input_bytes, config):
                 ty = y_pos - config['bleed'] + (target_h - (orig_h * scale)) / 2
                 
                 transform = Transformation().scale(scale, scale).translate(tx, ty)
-                temp_page.add_transformation(transform)
-                sheet.merge_page(temp_page, over=True)
+                input_page.add_transformation(transform)
+                sheet.merge_page(input_page, over=True)
                 
                 # --- GENERATE PHYSICAL TRIM MARKS OUTSIDE BLEED BOUNDS ---
                 if mark_style != "None":
@@ -575,7 +573,6 @@ def execute_pdf_imposition(input_bytes, config):
     output_stream = io.BytesIO()
     writer.write(output_stream)
     return output_stream.getvalue(), ups_per_page, round(last_computed_scale * 100.0, 1)
-
 
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
