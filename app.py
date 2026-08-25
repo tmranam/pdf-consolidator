@@ -383,23 +383,18 @@ def create_labels_pdf(
     packet.seek(0)
     return packet
 
-# Helper function for dynamic PDF imposition engine (Fixed for true commercial Cut & Stack sorting)
+# =========================================================================
+# HELPER FUNCTION FOR DYNAMIC IMPOSITION LAYOUT MATH MATRIX ENGINE
+# =========================================================================
 def execute_pdf_imposition(input_bytes, config):
     import math
+    import io
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
     from reportlab.pdfgen import canvas
     
     reader = PdfReader(io.BytesIO(input_bytes))
-    
-    # Clone input pages according to repeat multiplier
-    virtual_page_pool = []
-    repeat_count = config.get('repeat_per_page', 1)
-    
-    for original_page in reader.pages:
-        for _ in range(repeat_count):
-            virtual_page_pool.append(original_page)
-            
-    total_input_pages = len(virtual_page_pool)
+    original_pages = list(reader.pages)
+    total_original_pages = len(original_pages)
     
     # Calculate dimensional limits inside available printable area
     avail_w = config['media_w'] - config['margins']['left'] - config['margins']['right']
@@ -408,82 +403,98 @@ def execute_pdf_imposition(input_bytes, config):
     step_x = config['trim_w'] + config['gutter_x']
     step_y = config['trim_h'] + config['gutter_y']
     
-    # Determine max rows/cols that physically fit on the sheet
+    # Determine max rows/cols that physically fit on the sheet footprint
     cols = max(1, int((avail_w + config['gutter_x']) / step_x))
     rows = max(1, int((avail_h + config['gutter_y']) / step_y))
     ups_per_page = cols * rows
     
-    # Calculate the exact stack depth (how many physical sheets are in the pile)
-    # For 12 pages at 4-up, stack_depth = 3 sheets
-    stack_depth = math.ceil(total_input_pages / ups_per_page)
+    # Extract user input UI flags
+    layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
+    repeat_count = config.get('repeat_per_page', 1)
+    is_duplex = config.get('duplex', False)
     
-    if config['duplex']:
-        # Duplex layouts process front/back signature sheet pairs, forcing an even sheet pile count
-        if stack_depth % 2 != 0:
-            stack_depth += 1
-            
-    total_sheets = stack_depth
-
-    writer = PdfWriter()
-    
-    # Check magnification and fit behavior configuration flags
-    fit_to_size = config.get('fit_to_size', True)
-    mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
-    
-    last_computed_scale = 1.0
-    
-    for sheet_idx in range(total_sheets):
-        sheet = PageObject.create_blank_page(width=config['media_w'], height=config['media_h'])
+    # --- PHASE 1: STRUCTURAL ROUTING BY PRODUCTION TYPE ---
+    if "Cut and Stack" in layout_mode:
+        # Cut & Stack: Total sheets required based on original unique pages divided by grid capacity
+        stack_depth = math.ceil(total_original_pages / ups_per_page)
         
-        # In duplex mode, odd index sheets (1, 3, 5...) are back pages
-        is_back_page = config['duplex'] and (sheet_idx % 2 == 1)
-        
-        # For duplex printing, the back page must match the exact front sheet's grid index allocation
-        # Sheet 0 (front) and Sheet 1 (back) both represent the first sheet layer in the cut stack pile
-        if config['duplex']:
-            current_stack_layer = sheet_idx // 2
+        if is_duplex:
+            if stack_depth % 2 != 0:
+                stack_depth += 1  # Force sheet pile to be an even number for front/back pairs
+            total_sheets = stack_depth
             total_stack_layers = total_sheets // 2
         else:
-            current_stack_layer = sheet_idx
+            total_sheets = stack_depth
             total_stack_layers = total_sheets
+    else:
+        # Step & Repeat: Each page is completely filled into its own grid sets
+        sheets_per_original_page = math.ceil(repeat_count / ups_per_page)
+        if is_duplex and (sheets_per_original_page % 2 != 0):
+            sheets_per_original_page += 1
+                
+        total_sheets = total_original_pages * sheets_per_original_page
+
+    writer = PdfWriter()
+    fit_to_size = config.get('fit_to_size', True)
+    mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
+    last_computed_scale = 1.0
+    # --- PHASE 2: GRID COMPOSING MATRIX LOOP ---
+    for sheet_idx in range(total_sheets):
+        sheet = PageObject.create_blank_page(width=config['media_w'], height=config['media_h'])
+        is_back_page = is_duplex and (sheet_idx % 2 == 1)
         
         # Prepare a transparent ReportLab canvas overlay for Trim Marks
         mark_packet = io.BytesIO()
         mark_can = canvas.Canvas(mark_packet, pagesize=(config['media_w'], config['media_h']))
         mark_can.setStrokeColorRGB(0, 0, 0) 
         mark_can.setLineWidth(0.5)          
-        
         mark_style = config.get('trim_marks_style', "None")
         
         for r in range(rows):
             for c in range(cols):
-                # --- FIXED: TRUE COMMERCIAL CUT & STACK GRID PACKING LOOP ---
-                if config['layout_mode'] == "Cut and Stack":
-                    if config['duplex']:
+                input_page = None
+                
+                # --- CALCULATE EXACT INDEX FOR CUT & STACK PRINTING ---
+                if "Cut and Stack" in layout_mode:
+                    current_stack_layer = (sheet_idx // 2) if is_duplex else sheet_idx
+                    grid_position_idx = (r * cols) + c
+                    
+                    if is_duplex:
                         if is_back_page:
-                            # Back pages back up the matching front grid position.
-                            # Mirror columns on the back page so front/back align when cut.
                             c_front = cols - 1 - c
                             grid_position_idx = (r * cols) + c_front
-                            
-                            # Back pages map to the matching front page index + 1
-                            input_page_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2) + 1
+                            virtual_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2) + 1
                         else:
-                            # Front pages map to even positions through the stack height
-                            grid_position_idx = (r * cols) + c
-                            input_page_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2)
+                            virtual_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2)
                     else:
-                        # Standard Simplex Cut & Stack mapping matrix
-                        grid_position_idx = (r * cols) + c
-                        input_page_idx = (grid_position_idx * total_stack_layers) + current_stack_layer
+                        virtual_idx = (grid_position_idx * total_stack_layers) + current_stack_layer
+                        
+                    if virtual_idx < total_original_pages:
+                        input_page = original_pages[virtual_idx]
+                        
+                # --- CALCULATE EXACT INDEX FOR STEP & REPEAT PRINTING ---
                 else:
-                    # Standard Step & Repeat sequence layout
-                    input_page_idx = (sheet_idx * ups_per_page) + (r * cols + c)
+                    sheets_per_group = total_sheets // total_original_pages
+                    original_page_target_idx = sheet_idx // sheets_per_group
+                    local_sheet_offset = sheet_idx % sheets_per_group
+                    
+                    if is_duplex:
+                        local_layer = local_sheet_offset // 2
+                        grid_position_idx = (r * cols) + c
+                        if is_back_page:
+                            c_front = cols - 1 - c
+                            grid_position_idx = (r * cols) + c_front
+                            virtual_repeat_idx = (local_layer * ups_per_page * 2) + (grid_position_idx * 2) + 1
+                        else:
+                            virtual_repeat_idx = (local_layer * ups_per_page * 2) + (grid_position_idx * 2)
+                    else:
+                        virtual_repeat_idx = (local_sheet_offset * ups_per_page) + (r * cols) + c
+                        
+                    if virtual_repeat_idx < repeat_count and original_page_target_idx < total_original_pages:
+                        input_page = original_pages[original_page_target_idx]
                 
-                if input_page_idx >= total_input_pages:
+                if input_page is None:
                     continue
-                
-                input_page = virtual_page_pool[input_page_idx]
                 
                 # Flip X-axis positions for back-page alignment on duplex templates
                 if is_back_page:
@@ -494,7 +505,6 @@ def execute_pdf_imposition(input_bytes, config):
                     
                 y_pos = config['media_h'] - config['margins']['top'] - (r * step_y) - config['trim_h']
                 
-                # Process placement and bleed scaling
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
                 
@@ -565,7 +575,7 @@ def execute_pdf_imposition(input_bytes, config):
         mark_packet.seek(0)
         mark_reader = PdfReader(mark_packet)
         if len(mark_reader.pages) > 0:
-            sheet.merge_page(mark_reader.pages[0], over=True)
+            sheet.merge_page(mark_reader.pages, over=True)
             
         writer.add_page(sheet)
         
@@ -573,7 +583,112 @@ def execute_pdf_imposition(input_bytes, config):
     writer.write(output_stream)
     return output_stream.getvalue(), ups_per_page, round(last_computed_scale * 100.0, 1)
 
+# ---------------------------------------------------------
+# PAGE 1: IMPOSE (COMPLETE WORKSPACE INTERFACE BLOCK)
+# ---------------------------------------------------------
+if st.session_state.current_page == "impose":
+    st.subheader("📐 PDF Impose Layout Engine")
+    st.write("Upload source materials to impose, scale, and arrange pages for high-volume production presses.")
 
+    if "system_auto_scale_feedback" not in st.session_state:
+        st.session_state.system_auto_scale_feedback = 100.0
+
+    # 1. Primary Work File Dropzone
+    uploaded_impose_pdf = st.file_uploader("Upload Target PDF File to Impose", type=["pdf"], key="impose_file_uploader")
+    st.divider()
+    
+    st.markdown("#### 🛠️ Press Signature Configurations")
+    col_imp1, col_imp2 = st.columns(2)
+    
+    with col_imp1:
+        st.markdown("**Output Media Sheet Footprint (mm):**")
+        media_w_mm = st.number_input("Custom Sheet Width (mm):", min_value=50.0, max_value=2000.0, value=210.0, step=1.0)
+        media_h_mm = st.number_input("Custom Sheet Height (mm):", min_value=50.0, max_value=2000.0, value=297.0, step=1.0)
+        
+        st.write("---")
+        repeat_per_page = st.number_input("How many up? (Repeats per design page):", min_value=1, max_value=1000, value=4, step=1)
+        print_style = st.radio("Output Surface Type:", ["Simplex", "Duplex"], horizontal=True)
+        layout_choice = st.radio("Step Sequencing Route Pattern:", ["Repeat / Step & Repeat", "Cut and Stack"], horizontal=False)
+
+    with col_imp2:
+        trim_w = st.number_input("Finished Trim Width (mm):", min_value=5.0, max_value=500.0, value=90.0, step=0.5)
+        trim_h = st.number_input("Finished Trim Height (mm):", min_value=5.0, max_value=500.0, value=55.0, step=0.5)
+        bleed_w = st.number_input("Bleed Envelope Margin (mm):", min_value=0.0, max_value=25.0, value=2.0, step=0.5)
+        gut_x = st.number_input("Horizontal Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+        gut_y = st.number_input("Vertical Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+        
+        st.write("---")
+        fit_to_size_option = st.checkbox("Auto-Fit Content to Selected Trim Box?", value=True, help="When checked, automatically scales your design up or down to lock onto the trim size boundaries perfectly.")
+        
+        if fit_to_size_option:
+            magnification_pct = st.number_input(
+                f"Artwork Magnification Scale (%):", 
+                min_value=10.0, max_value=200.0, 
+                value=float(st.session_state.system_auto_scale_feedback), 
+                step=1.0, disabled=True, 
+                help="Showing the calculated scale ratio performed by the Auto-Fit layout machine framework."
+            )
+        else:
+            magnification_pct = st.number_input(
+                "Artwork Magnification Scale (%):", 
+                min_value=10.0, max_value=200.0, 
+                value=98.0, step=1.0, 
+                help="Type any precise manual percentage scale constraint layout size rule."
+            )
+            
+        trim_style_selection = st.selectbox(
+            "Select Trim Marks Option style:",
+            ["Outer Perimeter Only", "All Individual Items", "None"],
+            index=0,
+            help="Outer Perimeter Only ensures that no marks cut into the middle of the sheet or cross over adjacent artwork cells."
+        )
+
+    st.divider()
+
+    # Form Submission Trigger Action Button Hook
+    if st.button("Run Sheet Imposition Processing", type="primary", use_container_width=True):
+        if not uploaded_impose_pdf:
+            st.error("⚠️ Active source PDF file stream data must be staged before layout processing.")
+        else:
+            with st.spinner("Calculating layout transformations and packing pages..."):
+                try:
+                    MM_TO_PT = 2.83465
+                    imposition_runtime_config = {
+                        'media_w': media_w_mm * MM_TO_PT,
+                        'media_h': media_h_mm * MM_TO_PT,
+                        'trim_w': trim_w * MM_TO_PT,
+                        'trim_h': trim_h * MM_TO_PT,
+                        'bleed': bleed_w * MM_TO_PT,
+                        'gutter_x': gut_x * MM_TO_PT,
+                        'gutter_y': gut_y * MM_TO_PT,
+                        'margins': {'top': 25.0, 'bottom': 25.0, 'left': 25.0, 'right': 25.0},
+                        'layout_mode': layout_choice,
+                        'duplex': (print_style == "Duplex"),
+                        'repeat_per_page': int(repeat_per_page),
+                        'trim_marks_style': trim_style_selection,
+                        'fit_to_size': fit_to_size_option,
+                        'magnification_pct': float(magnification_pct) 
+                    }
+                    
+                    raw_input_bytes = uploaded_impose_pdf.read()
+                    compiled_output_pdf, total_calculated_ups, computed_percentage = execute_pdf_imposition(raw_input_bytes, imposition_runtime_config)
+                    
+                    st.session_state.system_auto_scale_feedback = computed_percentage
+                    st.success(f"🎉 Imposition Matrix Calculated Successfully!")
+                    
+                    if fit_to_size_option:
+                        st.info(f"📊 **Auto-Fit Metric:** Source artwork was automatically scaled to **{computed_percentage}%** of its original size to fit the requested trim window bounds.")
+                    
+                    base_name = os.path.splitext(uploaded_impose_pdf.name)[0]
+                    st.download_button(
+                        label=f"⬇️ Download Imposed Output File",
+                        data=compiled_output_pdf,
+                        file_name=f"{base_name}_Imposed_{repeat_per_page}Up.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                except Exception as ex_err:
+                    st.error(f"An unexpected failure sequence broke the layout engine logic block execution path: {str(ex_err)}")
 
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
