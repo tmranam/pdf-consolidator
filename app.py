@@ -383,14 +383,14 @@ def create_labels_pdf(
     packet.seek(0)
     return packet
 
-# Helper function for dynamic PDF imposition engine (Fixed with explicit cloning loop)
+# Helper function for dynamic PDF imposition engine (Fixed page-cloning mutation bug)
 def execute_pdf_imposition(input_bytes, config):
     import math
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
     
     reader = PdfReader(io.BytesIO(input_bytes))
     
-    # --- STEP 1: CLONE INPUT PAGES ACCORDING TO REPEAT MULTIPLIER ---
+    # Clone input pages according to repeat multiplier
     virtual_page_pool = []
     repeat_count = config.get('repeat_per_page', 1)
     
@@ -446,9 +446,14 @@ def execute_pdf_imposition(input_bytes, config):
                     
                 y_pos = config['media_h'] - config['margins']['top'] - (r * step_y) - config['trim_h']
                 
-                # Check bounds and run matrix transformations
+                # Check dimensions of the original design page
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
+                
+                # --- FIX: Create an isolated temporary page to break object reference links ---
+                temp_page = PageObject.create_blank_page(width=orig_w, height=orig_h)
+                temp_page.merge_page(input_page, over=True)
+                
                 target_w = config['trim_w'] + (2 * config['bleed'])
                 target_h = config['trim_h'] + (2 * config['bleed'])
                 
@@ -456,17 +461,16 @@ def execute_pdf_imposition(input_bytes, config):
                 tx = x_pos - config['bleed'] + (target_w - (orig_w * scale)) / 2
                 ty = y_pos - config['bleed'] + (target_h - (orig_h * scale)) / 2
                 
-                # Build transformation logic, apply to incoming page, then merge flat
+                # Apply transformation safely to the temporary object container, then merge
                 transform = Transformation().scale(scale, scale).translate(tx, ty)
-                input_page.add_transformation(transform)
-                sheet.merge_page(input_page, over=True)
+                temp_page.add_transformation(transform)
+                sheet.merge_page(temp_page, over=True)
                 
         writer.add_page(sheet)
         
     output_stream = io.BytesIO()
     writer.write(output_stream)
     return output_stream.getvalue(), ups_per_page
-
 
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
