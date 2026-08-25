@@ -383,13 +383,22 @@ def create_labels_pdf(
     packet.seek(0)
     return packet
 
-# Helper function for dynamic PDF imposition engine (Fixed for modern pypdf)
+# Helper function for dynamic PDF imposition engine (Fixed with explicit cloning loop)
 def execute_pdf_imposition(input_bytes, config):
     import math
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
     
     reader = PdfReader(io.BytesIO(input_bytes))
-    total_input_pages = len(reader.pages)
+    
+    # --- STEP 1: CLONE INPUT PAGES ACCORDING TO REPEAT MULTIPLIER ---
+    virtual_page_pool = []
+    repeat_count = config.get('repeat_per_page', 1)
+    
+    for original_page in reader.pages:
+        for _ in range(repeat_count):
+            virtual_page_pool.append(original_page)
+            
+    total_input_pages = len(virtual_page_pool)
     
     # Calculate dimensional limits inside available printable area
     avail_w = config['media_w'] - config['margins']['left'] - config['margins']['right']
@@ -398,7 +407,7 @@ def execute_pdf_imposition(input_bytes, config):
     step_x = config['trim_w'] + config['gutter_x']
     step_y = config['trim_h'] + config['gutter_y']
     
-    # Determine max rows/cols that fit on the sheet
+    # Determine max rows/cols that physically fit on the sheet
     cols = max(1, int((avail_w + config['gutter_x']) / step_x))
     rows = max(1, int((avail_h + config['gutter_y']) / step_y))
     ups_per_page = cols * rows
@@ -425,8 +434,8 @@ def execute_pdf_imposition(input_bytes, config):
                 if input_page_idx >= total_input_pages:
                     continue
                 
-                # Fetch a clean page object clone out of source layout index references
-                input_page = reader.pages[input_page_idx]
+                # Fetch page out of our virtual cloned pool
+                input_page = virtual_page_pool[input_page_idx]
                 
                 # Flip X-axis positions for back-page alignment on duplex templates
                 if is_back_page:
@@ -447,7 +456,6 @@ def execute_pdf_imposition(input_bytes, config):
                 tx = x_pos - config['bleed'] + (target_w - (orig_w * scale)) / 2
                 ty = y_pos - config['bleed'] + (target_h - (orig_h * scale)) / 2
                 
-                # --- FIXED PYPDF WORKFLOW MATRIX PATHWAY ---
                 # Build transformation logic, apply to incoming page, then merge flat
                 transform = Transformation().scale(scale, scale).translate(tx, ty)
                 input_page.add_transformation(transform)
@@ -458,6 +466,7 @@ def execute_pdf_imposition(input_bytes, config):
     output_stream = io.BytesIO()
     writer.write(output_stream)
     return output_stream.getvalue(), ups_per_page
+
 
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
@@ -490,7 +499,7 @@ with col5:
 st.divider()
 
 # ---------------------------------------------------------
-# PAGE 1: IMPOSE (REPLACED PLACEHOLDER WITH FIXED ENGINE & VARIABLE MEDIA SIZES)
+# PAGE 1: IMPOSE (UPDATED WITH REPEAT COUNT MULTIPLIER AND VARIABLE MEDIA SIZES)
 # ---------------------------------------------------------
 if st.session_state.current_page == "impose":
     st.subheader("📐 PDF Impose Layout Engine")
@@ -505,12 +514,13 @@ if st.session_state.current_page == "impose":
     col_imp1, col_imp2 = st.columns(2)
     
     with col_imp1:
-        # Replaced locked dropdown choice matrix with fully custom sizing variables
         st.markdown("**Output Media Sheet Footprint (mm):**")
         media_w_mm = st.number_input("Custom Sheet Width (mm):", min_value=50.0, max_value=2000.0, value=210.0, step=1.0)
         media_h_mm = st.number_input("Custom Sheet Height (mm):", min_value=50.0, max_value=2000.0, value=297.0, step=1.0)
         
         st.write("---")
+        # NEW WIDGET: Controls the step replication multiplier matrix logic loop
+        repeat_per_page = st.number_input("How many up? (Repeats per design page):", min_value=1, max_value=1000, value=4, step=1)
         print_style = st.radio("Output Surface Type:", ["Simplex", "Duplex"], horizontal=True)
         layout_choice = st.radio("Step Sequencing Route Pattern:", ["Repeat / Step & Repeat", "Cut and Stack"], horizontal=False)
 
@@ -545,7 +555,8 @@ if st.session_state.current_page == "impose":
                         # Margins inside outer sheet edges to accommodate printer clamp limitations
                         'margins': {'top': 20.0, 'bottom': 20.0, 'left': 20.0, 'right': 20.0},
                         'layout_mode': layout_choice,
-                        'duplex': (print_style == "Duplex")
+                        'duplex': (print_style == "Duplex"),
+                        'repeat_per_page': int(repeat_per_page) # Passed straight into cloning pool loop
                     }
                     
                     # Extract binary payload array values out of file uploader session memory
@@ -554,14 +565,14 @@ if st.session_state.current_page == "impose":
                     # Process file layout allocations
                     compiled_output_pdf, total_calculated_ups = execute_pdf_imposition(raw_input_bytes, imposition_runtime_config)
                     
-                    st.success(f"🎉 Imposition Matrix Calculated Successfully! Fitted exactly **{total_calculated_ups} ups** per print sheet signatures.")
+                    st.success(f"🎉 Imposition Matrix Calculated Successfully! Fitted up to **{total_calculated_ups} rows/columns** across print signature layouts.")
                     
                     # Display production file download stream pipeline action widget
                     base_name = os.path.splitext(uploaded_impose_pdf.name)[0]
                     st.download_button(
-                        label=f"⬇️ Download Imposed {base_name}.pdf",
+                        label=f"⬇️ Download Imposed Output File",
                         data=compiled_output_pdf,
-                        file_name=f"{base_name}_Imposed_Output.pdf",
+                        file_name=f"{base_name}_Imposed_{repeat_per_page}Up.pdf",
                         mime="application/pdf",
                         use_container_width=True
                     )
