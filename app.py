@@ -383,6 +383,77 @@ def create_labels_pdf(
     packet.seek(0)
     return packet
 
+# Helper function for dynamic PDF imposition engine
+def execute_pdf_imposition(input_bytes, config):
+    import math
+    from pypdf import PdfReader, PdfWriter, PageObject, Transformation
+    
+    reader = PdfReader(io.BytesIO(input_bytes))
+    total_input_pages = len(reader.pages)
+    
+    # Calculate dimensional limits inside available printable area
+    avail_w = config['media_w'] - config['margins']['left'] - config['margins']['right']
+    avail_h = config['media_h'] - config['margins']['top'] - config['margins']['bottom']
+    
+    step_x = config['trim_w'] + config['gutter_x']
+    step_y = config['trim_h'] + config['gutter_y']
+    
+    # Determine max rows/cols that fit on the sheet
+    cols = max(1, int((avail_w + config['gutter_x']) / step_x))
+    rows = max(1, int((avail_h + config['gutter_y']) / step_y))
+    ups_per_page = cols * rows
+    
+    # Calculate total required physical sheets
+    total_sheets = math.ceil(total_input_pages / ups_per_page)
+    if config['duplex'] and total_sheets % 2 != 0:
+        total_sheets += 1  # Ensure even pairs for double-sided backups
+
+    writer = PdfWriter()
+    
+    for sheet_idx in range(total_sheets):
+        sheet = PageObject.create_blank_page(width=config['media_w'], height=config['media_h'])
+        is_back_page = config['duplex'] and (sheet_idx % 2 == 1)
+        
+        for r in range(rows):
+            for c in range(cols):
+                # Apply layout matrix sorting routes
+                if config['layout_mode'] == "Cut and Stack":
+                    input_page_idx = sheet_idx + (r * cols + c) * total_sheets
+                else:  # Standard Step & Repeat
+                    input_page_idx = (sheet_idx * ups_per_page) + (r * cols + c)
+                
+                if input_page_idx >= total_input_pages:
+                    continue
+                    
+                input_page = reader.pages[input_page_idx]
+                
+                # Flip X-axis positions for back-page alignment on duplex templates
+                if is_back_page:
+                    c_eff = cols - 1 - c
+                    x_pos = config['media_w'] - config['margins']['right'] - (c_eff * step_x) - config['trim_w']
+                else:
+                    x_pos = config['margins']['left'] + (c * step_x)
+                    
+                y_pos = config['media_h'] - config['margins']['top'] - (r * step_y) - config['trim_h']
+                
+                # Check bounds and run matrix transformations
+                orig_w = float(input_page.mediabox.width)
+                orig_h = float(input_page.mediabox.height)
+                target_w = config['trim_w'] + (2 * config['bleed'])
+                target_h = config['trim_h'] + (2 * config['bleed'])
+                
+                scale = min(target_w / orig_w, target_h / orig_h)
+                tx = x_pos - config['bleed'] + (target_w - (orig_w * scale)) / 2
+                ty = y_pos - config['bleed'] + (target_h - (orig_h * scale)) / 2
+                
+                transform = Transformation().scale(scale, scale).translate(tx, ty)
+                sheet.merge_page(input_page, transformation=transform, over=True)
+                
+        writer.add_page(sheet)
+        
+    output_stream = io.BytesIO()
+    writer.write(output_stream)
+    return output_stream.getvalue(), ups_per_page
 
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
@@ -417,12 +488,83 @@ st.divider()
 # ---------------------------------------------------------
 # PAGE 1: IMPOSE
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# PAGE 1: IMPOSE (REPLACED PLACEHOLDER WITH ACTIVE ENGINE UI)
+# ---------------------------------------------------------
 if st.session_state.current_page == "impose":
-    st.subheader("📐 PDF Impose Tool")
-    st.write(
-        "Layout and arrange pages for print imposition (e.g., 2-up, 4-up)."
-    )
-    st.info("Feature placeholder: Upload PDFs to begin imposition layout.")
+    st.subheader("📐 PDF Impose Layout Engine")
+    st.write("Upload source materials to impose, scale, and arrange pages for high-volume production presses.")
+
+    # 1. Primary Work File Dropzone
+    uploaded_impose_pdf = st.file_uploader("Upload Target PDF File to Impose", type=["pdf"], key="impose_file_uploader")
+    
+    st.divider()
+    
+    st.markdown("#### 🛠️ Press Signature Configurations")
+    col_imp1, col_imp2 = st.columns(2)
+    
+    with col_imp1:
+        media_choice = st.selectbox("Output Media Sheet Size:", ["A4", "Letter", "A3"], index=0)
+        print_style = st.radio("Output Surface Type:", ["Simplex", "Duplex"], horizontal=True)
+        layout_choice = st.radio("Step Sequencing Route Pattern:", ["Repeat / Step & Repeat", "Cut and Stack"], horizontal=False)
+
+    with col_imp2:
+        trim_w = st.number_input("Finished Trim Width (mm):", min_value=5.0, max_value=500.0, value=90.0, step=0.5)
+        trim_h = st.number_input("Finished Trim Height (mm):", min_value=5.0, max_value=500.0, value=55.0, step=0.5)
+        bleed_w = st.number_input("Bleed Envelope Margin (mm):", min_value=0.0, max_value=25.0, value=2.0, step=0.5)
+        gut_x = st.number_input("Horizontal Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+        gut_y = st.number_input("Vertical Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+
+    st.divider()
+
+    # Form Submission Trigger Action Button Hook
+    if st.button("Run Sheet Imposition Processing", type="primary", use_container_width=True):
+        if not uploaded_impose_pdf:
+            st.error("⚠️ Active source PDF file stream data must be staged before layout processing.")
+        else:
+            with st.spinner("Calculating layout transformations and packing pages..."):
+                try:
+                    # Conversion baseline ratio: 1 millimeter = 2.83465 PostScript desktop points
+                    MM_TO_PT = 2.83465
+                    
+                    # Target layout envelope presets
+                    size_map = {"A4": (595.27, 841.89), "Letter": (612.0, 792.0), "A3": (841.89, 1190.55)}
+                    chosen_w, chosen_h = size_map.get(media_choice, (595.27, 841.89))
+                    
+                    # Generate dynamic configuration mapping dictionary parameters
+                    imposition_runtime_config = {
+                        'media_w': chosen_w,
+                        'media_h': chosen_h,
+                        'trim_w': trim_w * MM_TO_PT,
+                        'trim_h': trim_h * MM_TO_PT,
+                        'bleed': bleed_w * MM_TO_PT,
+                        'gutter_x': gut_x * MM_TO_PT,
+                        'gutter_y': gut_y * MM_TO_PT,
+                        # Margins inside outer sheet edges to accommodate printer clamp limitations
+                        'margins': {'top': 20.0, 'bottom': 20.0, 'left': 20.0, 'right': 20.0},
+                        'layout_mode': layout_choice,
+                        'duplex': (print_style == "Duplex")
+                    }
+                    
+                    # Extract binary payload array values out of file uploader session memory
+                    raw_input_bytes = uploaded_impose_pdf.read()
+                    
+                    # Process file layout allocations
+                    compiled_output_pdf, total_calculated_ups = execute_pdf_imposition(raw_input_bytes, imposition_runtime_config)
+                    
+                    st.success(f"🎉 Imposition Matrix Calculated Successfully! Fitted exactly **{total_calculated_ups} ups** per print sheet signatures.")
+                    
+                    # Display production file download stream pipeline action widget
+                    base_name = os.path.splitext(uploaded_impose_pdf.name)[0]
+                    st.download_button(
+                        label=f"⬇️ Download Imposed {base_name}.pdf",
+                        data=compiled_output_pdf,
+                        file_name=f"{base_name}_Imposed_Output.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                except Exception as ex_err:
+                    st.error(f"An unexpected failure sequence broke the layout engine logic block execution path: {str(ex_err)}")
 
 # ---------------------------------------------------------
 # PAGE 2: DUPLICATE PAGES
