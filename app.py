@@ -383,7 +383,7 @@ def create_labels_pdf(
     packet.seek(0)
     return packet
 
-# Helper function for dynamic PDF imposition engine (With selectable outer/inner trim marks)
+# Helper function for dynamic PDF imposition engine (With Auto-Bleed Shift & Manual Magnification)
 def execute_pdf_imposition(input_bytes, config):
     import math
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
@@ -419,6 +419,9 @@ def execute_pdf_imposition(input_bytes, config):
         total_sheets += 1
 
     writer = PdfWriter()
+    
+    # Extract structural magnification override value (e.g., 100% -> 1.0)
+    mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     
     for sheet_idx in range(total_sheets):
         sheet = PageObject.create_blank_page(width=config['media_w'], height=config['media_h'])
@@ -463,7 +466,10 @@ def execute_pdf_imposition(input_bytes, config):
                 target_w = config['trim_w'] + (2 * config['bleed'])
                 target_h = config['trim_h'] + (2 * config['bleed'])
                 
-                scale = min(target_w / orig_w, target_h / orig_h)
+                # --- APPLY MAGNIFICATION OVERRIDE ON TOP OF BASE ASPECT SCALE ---
+                base_scale = min(target_w / orig_w, target_h / orig_h)
+                scale = base_scale * mag_factor
+                
                 tx = x_pos - config['bleed'] + (target_w - (orig_w * scale)) / 2
                 ty = y_pos - config['bleed'] + (target_h - (orig_h * scale)) / 2
                 
@@ -471,7 +477,7 @@ def execute_pdf_imposition(input_bytes, config):
                 temp_page.add_transformation(transform)
                 sheet.merge_page(temp_page, over=True)
                 
-                # --- DYNAMIC EXTRA-SAFE TRIM MARK GENERATION ---
+                # --- GENERATE PHYSICAL TRIM MARKS OUTSIDE BLEED BOUNDS ---
                 if mark_style != "None":
                     mark_len = 12.0
                     offset = config['bleed'] + 3.0  # Kept safely outside your output artwork bleed zone
@@ -479,13 +485,11 @@ def execute_pdf_imposition(input_bytes, config):
                     x1, x2 = x_pos, x_pos + config['trim_w']
                     y1, y2 = y_pos, y_pos + config['trim_h']
                     
-                    # Core rule check variables to isolate perimeter vs grid center locations
                     is_left_edge = (c == 0) if not is_back_page else (c == cols - 1)
                     is_right_edge = (c == cols - 1) if not is_back_page else (c == 0)
                     is_top_edge = (r == 0)
                     is_bottom_edge = (r == rows - 1)
                     
-                    # Fallback condition variable to bypass boundaries filter
                     draw_all = (mark_style == "All Individual Items")
                     
                     # Top-Left Corner Cut Marks
@@ -525,13 +529,14 @@ def execute_pdf_imposition(input_bytes, config):
         mark_packet.seek(0)
         mark_reader = PdfReader(mark_packet)
         if len(mark_reader.pages) > 0:
-            sheet.merge_page(mark_reader.pages[0], over=True)
+            sheet.merge_page(mark_reader.pages, over=True)
             
         writer.add_page(sheet)
         
     output_stream = io.BytesIO()
     writer.write(output_stream)
     return output_stream.getvalue(), ups_per_page
+
 
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
@@ -564,7 +569,7 @@ with col5:
 st.divider()
 
 # ---------------------------------------------------------
-# PAGE 1: IMPOSE (UPDATED WITH SELECTABLE TRIM MARK STYLES)
+# PAGE 1: IMPOSE (UPDATED WITH MAGNIFICATION OVERRIDE SLIDER)
 # ---------------------------------------------------------
 if st.session_state.current_page == "impose":
     st.subheader("📐 PDF Impose Layout Engine")
@@ -596,7 +601,9 @@ if st.session_state.current_page == "impose":
         gut_y = st.number_input("Vertical Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
         
         st.write("---")
-        # NEW REPLACED WIDGET: Selectable style options dropdown
+        # NEW WIDGET: Magnification ratio factor rule slider
+        magnification_pct = st.slider("Artwork Magnification Scale (%):", min_value=10, max_value=200, value=100, step=5, help="100% fits perfectly to your design trim boxes. Increase or decrease to manually scale.")
+        
         trim_style_selection = st.selectbox(
             "Select Trim Marks Option style:",
             ["Outer Perimeter Only", "All Individual Items", "None"],
@@ -630,7 +637,8 @@ if st.session_state.current_page == "impose":
                         'layout_mode': layout_choice,
                         'duplex': (print_style == "Duplex"),
                         'repeat_per_page': int(repeat_per_page),
-                        'trim_marks_style': trim_style_selection  # Forwarded safely to layout loop
+                        'trim_marks_style': trim_style_selection,
+                        'magnification_pct': int(magnification_pct) # Forwarded cleanly to calculation engine
                     }
                     
                     # Extract binary payload array values out of file uploader session memory
@@ -642,7 +650,7 @@ if st.session_state.current_page == "impose":
                     st.success(f"🎉 Imposition Matrix Calculated Successfully! Arranged your multi-up sheet sequence.")
                     
                     # Display production file download stream pipeline action widget
-                    base_name = os.path.splitext(uploaded_impose_pdf.name)[0]
+                    base_name = os.path.splitext(uploaded_impose_pdf.name)
                     st.download_button(
                         label=f"⬇️ Download Imposed Output File",
                         data=compiled_output_pdf,
