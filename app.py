@@ -386,20 +386,26 @@ def create_labels_pdf(
 # Helper function for dynamic PDF imposition engine (Fixed for true commercial Cut & Stack sorting)
 def execute_pdf_imposition(input_bytes, config):
     import math
+    import io
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
     from reportlab.pdfgen import canvas
     
     reader = PdfReader(io.BytesIO(input_bytes))
+    layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
     
-    # Clone input pages according to repeat multiplier
-    virtual_page_pool = []
-    repeat_count = config.get('repeat_per_page', 1)
-    
-    for original_page in reader.pages:
-        for _ in range(repeat_count):
-            virtual_page_pool.append(original_page)
+    # --- PHASE 1: SEPARATE CLONING POOLS BY INTERFACE MODE ---
+    if "Cut and Stack" in layout_mode:
+        # Cut & Stack processes original unique pages sequentially through the pile
+        page_pool = list(reader.pages)
+    else:
+        # Step & Repeat clones each page N times before filling the matrix
+        page_pool = []
+        repeat_count = config.get('repeat_per_page', 1)
+        for original_page in reader.pages:
+            for _ in range(repeat_count):
+                page_pool.append(original_page)
             
-    total_input_pages = len(virtual_page_pool)
+    total_input_pages = len(page_pool)
     
     # Calculate dimensional limits inside available printable area
     avail_w = config['media_w'] - config['margins']['left'] - config['margins']['right']
@@ -414,7 +420,6 @@ def execute_pdf_imposition(input_bytes, config):
     ups_per_page = cols * rows
     
     # Calculate the exact stack depth (how many physical sheets are in the pile)
-    # For 12 pages at 4-up, stack_depth = 3 sheets
     stack_depth = math.ceil(total_input_pages / ups_per_page)
     
     if config['duplex']:
@@ -439,7 +444,6 @@ def execute_pdf_imposition(input_bytes, config):
         is_back_page = config['duplex'] and (sheet_idx % 2 == 1)
         
         # For duplex printing, the back page must match the exact front sheet's grid index allocation
-        # Sheet 0 (front) and Sheet 1 (back) both represent the first sheet layer in the cut stack pile
         if config['duplex']:
             current_stack_layer = sheet_idx // 2
             total_stack_layers = total_sheets // 2
@@ -457,15 +461,13 @@ def execute_pdf_imposition(input_bytes, config):
         
         for r in range(rows):
             for c in range(cols):
-                # --- FIXED: TRUE COMMERCIAL CUT & STACK GRID PACKING LOOP ---
-                if config['layout_mode'] == "Cut and Stack":
+                # --- TRUE COMMERCIAL CUT & STACK GRID PACKING LOOP ---
+                if "Cut and Stack" in layout_mode:
                     if config['duplex']:
                         if is_back_page:
                             # Back pages back up the matching front grid position.
-                            # Mirror columns on the back page so front/back align when cut.
                             c_front = cols - 1 - c
                             grid_position_idx = (r * cols) + c_front
-                            
                             # Back pages map to the matching front page index + 1
                             input_page_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2) + 1
                         else:
@@ -483,7 +485,7 @@ def execute_pdf_imposition(input_bytes, config):
                 if input_page_idx >= total_input_pages:
                     continue
                 
-                input_page = virtual_page_pool[input_page_idx]
+                input_page = page_pool[input_page_idx]
                 
                 # Flip X-axis positions for back-page alignment on duplex templates
                 if is_back_page:
@@ -494,7 +496,7 @@ def execute_pdf_imposition(input_bytes, config):
                     
                 y_pos = config['media_h'] - config['margins']['top'] - (r * step_y) - config['trim_h']
                 
-                # Process placement and bleed scaling
+                # Process placement and bleed scaling securely
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
                 
