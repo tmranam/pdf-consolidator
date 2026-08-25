@@ -383,7 +383,7 @@ def create_labels_pdf(
     packet.seek(0)
     return packet
 
-# Helper function for dynamic PDF imposition engine (With Auto-Bleed Shift Trim Marks)
+# Helper function for dynamic PDF imposition engine (With selectable outer/inner trim marks)
 def execute_pdf_imposition(input_bytes, config):
     import math
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
@@ -424,13 +424,13 @@ def execute_pdf_imposition(input_bytes, config):
         sheet = PageObject.create_blank_page(width=config['media_w'], height=config['media_h'])
         is_back_page = config['duplex'] and (sheet_idx % 2 == 1)
         
-        # Prepare a transparent ReportLab canvas overlay for Trim Marks on this sheet
+        # Prepare a transparent ReportLab canvas overlay for Trim Marks
         mark_packet = io.BytesIO()
         mark_can = canvas.Canvas(mark_packet, pagesize=(config['media_w'], config['media_h']))
-        mark_can.setStrokeColorRGB(0, 0, 0) # Registration Black cut lines
-        mark_can.setLineWidth(0.5)          # Hairline weight
+        mark_can.setStrokeColorRGB(0, 0, 0) 
+        mark_can.setLineWidth(0.5)          
         
-        draw_marks = config.get('trim_marks', False)
+        mark_style = config.get('trim_marks_style', "None")
         
         for r in range(rows):
             for c in range(cols):
@@ -453,7 +453,7 @@ def execute_pdf_imposition(input_bytes, config):
                     
                 y_pos = config['media_h'] - config['margins']['top'] - (r * step_y) - config['trim_h']
                 
-                # --- PROCESS PLACEMENT AND BLEED SCALING ---
+                # Process placement and bleed scaling
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
                 
@@ -471,30 +471,54 @@ def execute_pdf_imposition(input_bytes, config):
                 temp_page.add_transformation(transform)
                 sheet.merge_page(temp_page, over=True)
                 
-                # --- GENERATE PHYSICAL TRIM MARKS OUTSIDE BLEED BOUNDS ---
-                if draw_marks:
-                    # Clear lines 12pt (~4mm) long, offset 3pt from the edge of the bleed
+                # --- DYNAMIC EXTRA-SAFE TRIM MARK GENERATION ---
+                if mark_style != "None":
                     mark_len = 12.0
-                    offset = config['bleed'] + 3.0
+                    offset = config['bleed'] + 3.0  # Kept safely outside your output artwork bleed zone
                     
                     x1, x2 = x_pos, x_pos + config['trim_w']
                     y1, y2 = y_pos, y_pos + config['trim_h']
                     
-                    # Top-Left Mark
-                    mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)
-                    mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)
+                    # Core rule check variables to isolate perimeter vs grid center locations
+                    is_left_edge = (c == 0) if not is_back_page else (c == cols - 1)
+                    is_right_edge = (c == cols - 1) if not is_back_page else (c == 0)
+                    is_top_edge = (r == 0)
+                    is_bottom_edge = (r == rows - 1)
                     
-                    # Top-Right Mark
-                    mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)
-                    mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)
+                    # Fallback condition variable to bypass boundaries filter
+                    draw_all = (mark_style == "All Individual Items")
                     
-                    # Bottom-Left Mark
-                    mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)
-                    mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)
-                    
-                    # Bottom-Right Mark
-                    mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
-                    mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
+                    # Top-Left Corner Cut Marks
+                    if draw_all or (is_left_edge and is_top_edge):
+                        mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)
+                        mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)
+                    elif mark_style == "Outer Perimeter Only":
+                        if is_top_edge: mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)
+                        if is_left_edge: mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)
+                        
+                    # Top-Right Corner Cut Marks
+                    if draw_all or (is_right_edge and is_top_edge):
+                        mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)
+                        mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)
+                    elif mark_style == "Outer Perimeter Only":
+                        if is_top_edge: mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)
+                        if is_right_edge: mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)
+                        
+                    # Bottom-Left Corner Cut Marks
+                    if draw_all or (is_left_edge and is_bottom_edge):
+                        mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)
+                        mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)
+                    elif mark_style == "Outer Perimeter Only":
+                        if is_bottom_edge: mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)
+                        if is_left_edge: mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)
+                        
+                    # Bottom-Right Corner Cut Marks
+                    if draw_all or (is_right_edge and is_bottom_edge):
+                        mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
+                        mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
+                    elif mark_style == "Outer Perimeter Only":
+                        if is_bottom_edge: mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
+                        if is_right_edge: mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
                     
         # Commit vector strokes and merge overlay over the sheet
         mark_can.save()
@@ -508,7 +532,6 @@ def execute_pdf_imposition(input_bytes, config):
     output_stream = io.BytesIO()
     writer.write(output_stream)
     return output_stream.getvalue(), ups_per_page
-
 
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
@@ -541,7 +564,7 @@ with col5:
 st.divider()
 
 # ---------------------------------------------------------
-# PAGE 1: IMPOSE (UPDATED WITH REPEAT COUNT MULTIPLIER AND AUTO-BLEED TRIM MARKS)
+# PAGE 1: IMPOSE (UPDATED WITH SELECTABLE TRIM MARK STYLES)
 # ---------------------------------------------------------
 if st.session_state.current_page == "impose":
     st.subheader("📐 PDF Impose Layout Engine")
@@ -573,8 +596,13 @@ if st.session_state.current_page == "impose":
         gut_y = st.number_input("Vertical Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
         
         st.write("---")
-        # NEW WIDGET: Option checkbox to toggle trim line assets
-        add_trim_marks = st.checkbox("Draw Production Trim Marks?", value=True, help="Draws vector hairlines outside your bleed box showing where the machine cutting blades must strike.")
+        # NEW REPLACED WIDGET: Selectable style options dropdown
+        trim_style_selection = st.selectbox(
+            "Select Trim Marks Option style:",
+            ["Outer Perimeter Only", "All Individual Items", "None"],
+            index=0,
+            help="Outer Perimeter Only ensures that no marks cut into the middle of the sheet or cross over adjacent artwork cells."
+        )
 
     st.divider()
 
@@ -602,7 +630,7 @@ if st.session_state.current_page == "impose":
                         'layout_mode': layout_choice,
                         'duplex': (print_style == "Duplex"),
                         'repeat_per_page': int(repeat_per_page),
-                        'trim_marks': add_trim_marks # Value passed to engine
+                        'trim_marks_style': trim_style_selection  # Forwarded safely to layout loop
                     }
                     
                     # Extract binary payload array values out of file uploader session memory
