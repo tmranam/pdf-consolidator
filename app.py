@@ -383,7 +383,7 @@ def create_labels_pdf(
     packet.seek(0)
     return packet
 
-# Helper function for dynamic PDF imposition engine (With Auto-Bleed Shift & Manual Magnification)
+# Helper function for dynamic PDF imposition engine (Fixed VirtualList bug, added Fit-to-Size logic)
 def execute_pdf_imposition(input_bytes, config):
     import math
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
@@ -420,7 +420,8 @@ def execute_pdf_imposition(input_bytes, config):
 
     writer = PdfWriter()
     
-    # Extract structural magnification override value (e.g., 100% -> 1.0)
+    # Check magnification and fit behavior configuration flags
+    fit_to_size = config.get('fit_to_size', True)
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     
     for sheet_idx in range(total_sheets):
@@ -466,9 +467,12 @@ def execute_pdf_imposition(input_bytes, config):
                 target_w = config['trim_w'] + (2 * config['bleed'])
                 target_h = config['trim_h'] + (2 * config['bleed'])
                 
-                # --- APPLY MAGNIFICATION OVERRIDE ON TOP OF BASE ASPECT SCALE ---
-                base_scale = min(target_w / orig_w, target_h / orig_h)
-                scale = base_scale * mag_factor
+                # Compute scaling based on selected fit mode
+                if fit_to_size:
+                    scale = min(target_w / orig_w, target_h / orig_h)
+                else:
+                    # Absolute scale: unscaled identity matching 100% baseline ratio
+                    scale = 1.0 * mag_factor
                 
                 tx = x_pos - config['bleed'] + (target_w - (orig_w * scale)) / 2
                 ty = y_pos - config['bleed'] + (target_h - (orig_h * scale)) / 2
@@ -480,7 +484,7 @@ def execute_pdf_imposition(input_bytes, config):
                 # --- GENERATE PHYSICAL TRIM MARKS OUTSIDE BLEED BOUNDS ---
                 if mark_style != "None":
                     mark_len = 12.0
-                    offset = config['bleed'] + 3.0  # Kept safely outside your output artwork bleed zone
+                    offset = config['bleed'] + 3.0  
                     
                     x1, x2 = x_pos, x_pos + config['trim_w']
                     y1, y2 = y_pos, y_pos + config['trim_h']
@@ -529,7 +533,8 @@ def execute_pdf_imposition(input_bytes, config):
         mark_packet.seek(0)
         mark_reader = PdfReader(mark_packet)
         if len(mark_reader.pages) > 0:
-            sheet.merge_page(mark_reader.pages, over=True)
+            # --- FIX: Target the explicit index [0] instead of passing the raw _VirtualList container ---
+            sheet.merge_page(mark_reader.pages[0], over=True)
             
         writer.add_page(sheet)
         
@@ -569,7 +574,7 @@ with col5:
 st.divider()
 
 # ---------------------------------------------------------
-# PAGE 1: IMPOSE (UPDATED WITH MAGNIFICATION OVERRIDE SLIDER)
+# PAGE 1: IMPOSE (FIXED MAGNIFICATION WIDGETS & AUTO-FIT OPTIONS)
 # ---------------------------------------------------------
 if st.session_state.current_page == "impose":
     st.subheader("📐 PDF Impose Layout Engine")
@@ -601,9 +606,15 @@ if st.session_state.current_page == "impose":
         gut_y = st.number_input("Vertical Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
         
         st.write("---")
-        # NEW WIDGET: Magnification ratio factor rule slider
-        magnification_pct = st.slider("Artwork Magnification Scale (%):", min_value=10, max_value=200, value=100, step=5, help="100% fits perfectly to your design trim boxes. Increase or decrease to manually scale.")
+        # NEW WIDGETS: Replaced slider with an unlocked input box + an Auto-Fit scale checkbox option
+        fit_to_size_option = st.checkbox("Auto-Fit Content to Selected Trim Box?", value=True, help="When checked, automatically scales your design up or down to lock onto the trim size boundaries perfectly.")
         
+        # Disabled text element formatting block if Auto-Fit is tracking configurations
+        if fit_to_size_option:
+            magnification_pct = st.number_input("Artwork Magnification Scale (%):", min_value=10.0, max_value=200.0, value=100.0, step=1.0, disabled=True, help="Uncheck 'Auto-Fit' to override dimensions manually.")
+        else:
+            magnification_pct = st.number_input("Artwork Magnification Scale (%):", min_value=10.0, max_value=200.0, value=98.0, step=1.0, help="Type any precise manual percentage scale constraint layout size rule.")
+            
         trim_style_selection = st.selectbox(
             "Select Trim Marks Option style:",
             ["Outer Perimeter Only", "All Individual Items", "None"],
@@ -638,7 +649,8 @@ if st.session_state.current_page == "impose":
                         'duplex': (print_style == "Duplex"),
                         'repeat_per_page': int(repeat_per_page),
                         'trim_marks_style': trim_style_selection,
-                        'magnification_pct': int(magnification_pct) # Forwarded cleanly to calculation engine
+                        'fit_to_size': fit_to_size_option,
+                        'magnification_pct': float(magnification_pct) 
                     }
                     
                     # Extract binary payload array values out of file uploader session memory
@@ -660,6 +672,7 @@ if st.session_state.current_page == "impose":
                     )
                 except Exception as ex_err:
                     st.error(f"An unexpected failure sequence broke the layout engine logic block execution path: {str(ex_err)}")
+
 
 # ---------------------------------------------------------
 # PAGE 2: DUPLICATE PAGES
