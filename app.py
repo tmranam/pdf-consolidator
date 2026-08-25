@@ -383,7 +383,7 @@ def create_labels_pdf(
     packet.seek(0)
     return packet
 
-# Helper function for dynamic PDF imposition engine (Returns calculated scale parameters)
+# Helper function for dynamic PDF imposition engine (Fixed for true commercial Cut & Stack sorting)
 def execute_pdf_imposition(input_bytes, config):
     import math
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
@@ -413,10 +413,16 @@ def execute_pdf_imposition(input_bytes, config):
     rows = max(1, int((avail_h + config['gutter_y']) / step_y))
     ups_per_page = cols * rows
     
-    # Calculate total required physical sheets
-    total_sheets = math.ceil(total_input_pages / ups_per_page)
-    if config['duplex'] and total_sheets % 2 != 0:
-        total_sheets += 1
+    # Calculate the exact stack depth (how many physical sheets are in the pile)
+    # For 12 pages at 4-up, stack_depth = 3 sheets
+    stack_depth = math.ceil(total_input_pages / ups_per_page)
+    
+    if config['duplex']:
+        # Duplex layouts process front/back signature sheet pairs, forcing an even sheet pile count
+        if stack_depth % 2 != 0:
+            stack_depth += 1
+            
+    total_sheets = stack_depth
 
     writer = PdfWriter()
     
@@ -424,12 +430,22 @@ def execute_pdf_imposition(input_bytes, config):
     fit_to_size = config.get('fit_to_size', True)
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     
-    # Track calculated system scale to display on interface metrics panel
     last_computed_scale = 1.0
     
     for sheet_idx in range(total_sheets):
         sheet = PageObject.create_blank_page(width=config['media_w'], height=config['media_h'])
+        
+        # In duplex mode, odd index sheets (1, 3, 5...) are back pages
         is_back_page = config['duplex'] and (sheet_idx % 2 == 1)
+        
+        # For duplex printing, the back page must match the exact front sheet's grid index allocation
+        # Sheet 0 (front) and Sheet 1 (back) both represent the first sheet layer in the cut stack pile
+        if config['duplex']:
+            current_stack_layer = sheet_idx // 2
+            total_stack_layers = total_sheets // 2
+        else:
+            current_stack_layer = sheet_idx
+            total_stack_layers = total_sheets
         
         # Prepare a transparent ReportLab canvas overlay for Trim Marks
         mark_packet = io.BytesIO()
@@ -441,9 +457,27 @@ def execute_pdf_imposition(input_bytes, config):
         
         for r in range(rows):
             for c in range(cols):
+                # --- FIXED: TRUE COMMERCIAL CUT & STACK GRID PACKING LOOP ---
                 if config['layout_mode'] == "Cut and Stack":
-                    input_page_idx = sheet_idx + (r * cols + c) * total_sheets
+                    if config['duplex']:
+                        if is_back_page:
+                            # Back pages back up the matching front grid position.
+                            # Mirror columns on the back page so front/back align when cut.
+                            c_front = cols - 1 - c
+                            grid_position_idx = (r * cols) + c_front
+                            
+                            # Back pages map to the matching front page index + 1
+                            input_page_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2) + 1
+                        else:
+                            # Front pages map to even positions through the stack height
+                            grid_position_idx = (r * cols) + c
+                            input_page_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2)
+                    else:
+                        # Standard Simplex Cut & Stack mapping matrix
+                        grid_position_idx = (r * cols) + c
+                        input_page_idx = (grid_position_idx * total_stack_layers) + current_stack_layer
                 else:
+                    # Standard Step & Repeat sequence layout
                     input_page_idx = (sheet_idx * ups_per_page) + (r * cols + c)
                 
                 if input_page_idx >= total_input_pages:
@@ -470,13 +504,11 @@ def execute_pdf_imposition(input_bytes, config):
                 target_w = config['trim_w'] + (2 * config['bleed'])
                 target_h = config['trim_h'] + (2 * config['bleed'])
                 
-                # Compute scaling based on selected fit mode
                 if fit_to_size:
                     scale = min(target_w / orig_w, target_h / orig_h)
                 else:
                     scale = 1.0 * mag_factor
                 
-                # Save calculation result for interface session memory tracking loops
                 last_computed_scale = scale
                 
                 tx = x_pos - config['bleed'] + (target_w - (orig_w * scale)) / 2
@@ -501,7 +533,6 @@ def execute_pdf_imposition(input_bytes, config):
                     
                     draw_all = (mark_style == "All Individual Items")
                     
-                    # Top-Left Corner Cut Marks
                     if draw_all or (is_left_edge and is_top_edge):
                         mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)
                         mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)
@@ -509,7 +540,6 @@ def execute_pdf_imposition(input_bytes, config):
                         if is_top_edge: mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)
                         if is_left_edge: mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)
                         
-                    # Top-Right Corner Cut Marks
                     if draw_all or (is_right_edge and is_top_edge):
                         mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)
                         mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)
@@ -517,7 +547,6 @@ def execute_pdf_imposition(input_bytes, config):
                         if is_top_edge: mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)
                         if is_right_edge: mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)
                         
-                    # Bottom-Left Corner Cut Marks
                     if draw_all or (is_left_edge and is_bottom_edge):
                         mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)
                         mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)
@@ -525,7 +554,6 @@ def execute_pdf_imposition(input_bytes, config):
                         if is_bottom_edge: mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)
                         if is_left_edge: mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)
                         
-                    # Bottom-Right Corner Cut Marks
                     if draw_all or (is_right_edge and is_bottom_edge):
                         mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
                         mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
@@ -533,7 +561,6 @@ def execute_pdf_imposition(input_bytes, config):
                         if is_bottom_edge: mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
                         if is_right_edge: mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
                     
-        # Commit vector strokes and merge overlay over the sheet
         mark_can.save()
         mark_packet.seek(0)
         mark_reader = PdfReader(mark_packet)
@@ -544,8 +571,6 @@ def execute_pdf_imposition(input_bytes, config):
         
     output_stream = io.BytesIO()
     writer.write(output_stream)
-    
-    # --- RETURN VALUES INCLUDING SYSTEM CALCULATED SCALE PERCENTAGE ---
     return output_stream.getvalue(), ups_per_page, round(last_computed_scale * 100.0, 1)
 
 
