@@ -383,7 +383,7 @@ def create_labels_pdf(
     packet.seek(0)
     return packet
 
-# Helper function for dynamic PDF imposition engine (Fixed VirtualList bug, added Fit-to-Size logic)
+# Helper function for dynamic PDF imposition engine (Returns calculated scale parameters)
 def execute_pdf_imposition(input_bytes, config):
     import math
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
@@ -423,6 +423,9 @@ def execute_pdf_imposition(input_bytes, config):
     # Check magnification and fit behavior configuration flags
     fit_to_size = config.get('fit_to_size', True)
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
+    
+    # Track calculated system scale to display on interface metrics panel
+    last_computed_scale = 1.0
     
     for sheet_idx in range(total_sheets):
         sheet = PageObject.create_blank_page(width=config['media_w'], height=config['media_h'])
@@ -471,8 +474,10 @@ def execute_pdf_imposition(input_bytes, config):
                 if fit_to_size:
                     scale = min(target_w / orig_w, target_h / orig_h)
                 else:
-                    # Absolute scale: unscaled identity matching 100% baseline ratio
                     scale = 1.0 * mag_factor
+                
+                # Save calculation result for interface session memory tracking loops
+                last_computed_scale = scale
                 
                 tx = x_pos - config['bleed'] + (target_w - (orig_w * scale)) / 2
                 ty = y_pos - config['bleed'] + (target_h - (orig_h * scale)) / 2
@@ -533,14 +538,16 @@ def execute_pdf_imposition(input_bytes, config):
         mark_packet.seek(0)
         mark_reader = PdfReader(mark_packet)
         if len(mark_reader.pages) > 0:
-            # --- FIX: Target the explicit index [0] instead of passing the raw _VirtualList container ---
             sheet.merge_page(mark_reader.pages[0], over=True)
             
         writer.add_page(sheet)
         
     output_stream = io.BytesIO()
     writer.write(output_stream)
-    return output_stream.getvalue(), ups_per_page
+    
+    # --- RETURN VALUES INCLUDING SYSTEM CALCULATED SCALE PERCENTAGE ---
+    return output_stream.getvalue(), ups_per_page, round(last_computed_scale * 100.0, 1)
+
 
 
 # ---------------------------------------------------------
@@ -574,11 +581,15 @@ with col5:
 st.divider()
 
 # ---------------------------------------------------------
-# PAGE 1: IMPOSE (FIXED MAGNIFICATION WIDGETS & AUTO-FIT OPTIONS)
+# PAGE 1: IMPOSE (UPDATED WITH REAL-TIME SYSTEM ENGINE SCALE FEEDBACK METRICS)
 # ---------------------------------------------------------
 if st.session_state.current_page == "impose":
     st.subheader("📐 PDF Impose Layout Engine")
     st.write("Upload source materials to impose, scale, and arrange pages for high-volume production presses.")
+
+    # State parameter check loop initialization
+    if "system_auto_scale_feedback" not in st.session_state:
+        st.session_state.system_auto_scale_feedback = 100.0
 
     # 1. Primary Work File Dropzone
     uploaded_impose_pdf = st.file_uploader("Upload Target PDF File to Impose", type=["pdf"], key="impose_file_uploader")
@@ -606,14 +617,25 @@ if st.session_state.current_page == "impose":
         gut_y = st.number_input("Vertical Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
         
         st.write("---")
-        # NEW WIDGETS: Replaced slider with an unlocked input box + an Auto-Fit scale checkbox option
         fit_to_size_option = st.checkbox("Auto-Fit Content to Selected Trim Box?", value=True, help="When checked, automatically scales your design up or down to lock onto the trim size boundaries perfectly.")
         
-        # Disabled text element formatting block if Auto-Fit is tracking configurations
+        # --- DYNAMIC MAGNIFICATION INTERFACE VIEW UPDATE MATRIX ---
         if fit_to_size_option:
-            magnification_pct = st.number_input("Artwork Magnification Scale (%):", min_value=10.0, max_value=200.0, value=100.0, step=1.0, disabled=True, help="Uncheck 'Auto-Fit' to override dimensions manually.")
+            # Displays the auto-calculated magnification percentage inside the grayed-out number input box
+            magnification_pct = st.number_input(
+                f"Artwork Magnification Scale (%):", 
+                min_value=10.0, max_value=200.0, 
+                value=float(st.session_state.system_auto_scale_feedback), 
+                step=1.0, disabled=True, 
+                help="Showing the calculated scale ratio performed by the Auto-Fit layout machine framework."
+            )
         else:
-            magnification_pct = st.number_input("Artwork Magnification Scale (%):", min_value=10.0, max_value=200.0, value=98.0, step=1.0, help="Type any precise manual percentage scale constraint layout size rule.")
+            magnification_pct = st.number_input(
+                "Artwork Magnification Scale (%):", 
+                min_value=10.0, max_value=200.0, 
+                value=98.0, step=1.0, 
+                help="Type any precise manual percentage scale constraint layout size rule."
+            )
             
         trim_style_selection = st.selectbox(
             "Select Trim Marks Option style:",
@@ -643,7 +665,6 @@ if st.session_state.current_page == "impose":
                         'bleed': bleed_w * MM_TO_PT,
                         'gutter_x': gut_x * MM_TO_PT,
                         'gutter_y': gut_y * MM_TO_PT,
-                        # Margins inside outer sheet edges to accommodate printer clamp limitations
                         'margins': {'top': 25.0, 'bottom': 25.0, 'left': 25.0, 'right': 25.0},
                         'layout_mode': layout_choice,
                         'duplex': (print_style == "Duplex"),
@@ -656,10 +677,17 @@ if st.session_state.current_page == "impose":
                     # Extract binary payload array values out of file uploader session memory
                     raw_input_bytes = uploaded_impose_pdf.read()
                     
-                    # Process file layout allocations
-                    compiled_output_pdf, total_calculated_ups = execute_pdf_imposition(raw_input_bytes, imposition_runtime_config)
+                    # Unpack output values, capturing the calculated scale percentage
+                    compiled_output_pdf, total_calculated_ups, computed_percentage = execute_pdf_imposition(raw_input_bytes, imposition_runtime_config)
+                    
+                    # Store computed values in session state and reload view components
+                    st.session_state.system_auto_scale_feedback = computed_percentage
                     
                     st.success(f"🎉 Imposition Matrix Calculated Successfully! Arranged your multi-up sheet sequence.")
+                    
+                    # Display real-time conversion summary messages
+                    if fit_to_size_option:
+                        st.info(f"📊 **Auto-Fit Metric:** Source artwork was automatically scaled to **{computed_percentage}%** of its original size to fit the requested trim window bounds.")
                     
                     # Display production file download stream pipeline action widget
                     base_name = os.path.splitext(uploaded_impose_pdf.name)
@@ -670,9 +698,12 @@ if st.session_state.current_page == "impose":
                         mime="application/pdf",
                         use_container_width=True
                     )
+                    
+                    # Triggers a rerun so the disabled text box updates with the calculated percentage value immediately
+                    st.rerun()
+                    
                 except Exception as ex_err:
                     st.error(f"An unexpected failure sequence broke the layout engine logic block execution path: {str(ex_err)}")
-
 
 # ---------------------------------------------------------
 # PAGE 2: DUPLICATE PAGES
