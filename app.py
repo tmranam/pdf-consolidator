@@ -390,10 +390,10 @@ def execute_pdf_imposition(input_bytes, config):
     from pypdf.generic import RectangleObject
     from reportlab.pdfgen import canvas
     
-    # Strictly lock 1 mm = 2.83464566929 PDF Points (72 / 25.4)
+    # 1 mm = 2.83464566929 PDF Points (72 / 25.4)
     MM_TO_PT = 72.0 / 25.4
     
-    # 1. Parse Dimensions and convert directly to Points
+    # Parse dimensions and lock explicitly to points
     media_w = float(config.get('media_w', 320.0)) * MM_TO_PT
     media_h = float(config.get('media_h', 450.0)) * MM_TO_PT
     
@@ -408,6 +408,12 @@ def execute_pdf_imposition(input_bytes, config):
     margin_right = float(margins.get('right', 0.0)) * MM_TO_PT
     margin_top = float(margins.get('top', 0.0)) * MM_TO_PT
     margin_bottom = float(margins.get('bottom', 0.0)) * MM_TO_PT
+
+    # --- DEBUG: confirm the incoming config and the computed point values ---
+    print("[DEBUG] raw config media_w/media_h:", config.get('media_w'), config.get('media_h'))
+    print("[DEBUG] MM_TO_PT:", MM_TO_PT)
+    print("[DEBUG] media_w (pt):", media_w, " -> back to mm:", media_w / MM_TO_PT)
+    print("[DEBUG] media_h (pt):", media_h, " -> back to mm:", media_h / MM_TO_PT)
 
     reader = PdfReader(io.BytesIO(input_bytes))
     layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
@@ -488,13 +494,12 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 input_page = page_pool[input_page_idx]
                 
-                # --- STEP 1: READ ORIGINAL DIMENSIONS & ORIGIN OFFSETS ---
-                orig_ll_x = float(input_page.mediabox.lower_left[0])
-                orig_ll_y = float(input_page.mediabox.lower_left[1])
+                # --- FIX 1: NORMALIZE SOURCE PAGE ORIGIN TO (0,0) ---
+                ll_x = float(input_page.mediabox.lower_left[0])
+                ll_y = float(input_page.mediabox.lower_left[1])
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
                 
-                # Grid positioning
                 if is_back_page:
                     c_eff = cols - 1 - c
                     x_pos = media_w - margin_right - (c_eff * step_x) - trim_w
@@ -513,15 +518,15 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 last_computed_scale = scale
                 
-                # --- STEP 2: CALCULATE TRANSLATION TO CANCEL OUT SOURCE ORIGIN OFFSETS ---
-                tx = (x_pos - bleed + (target_w - (orig_w * scale)) / 2) - (orig_ll_x * scale)
-                ty = (y_pos - bleed + (target_h - (orig_h * scale)) / 2) - (orig_ll_y * scale)
+                # --- FIX 2: ACCOUNT FOR ORIGINAL LOWER-LEFT SHIFTS ---
+                tx = x_pos - bleed + (target_w - (orig_w * scale)) / 2 - (ll_x * scale)
+                ty = y_pos - bleed + (target_h - (orig_h * scale)) / 2 - (ll_y * scale)
                 
-                # --- STEP 3: MERGE TRANSFORMED PAGE CLEANLY ---
-                transform = Transformation().scale(scale, scale).translate(tx, ty)
-                sheet.merge_transformed_page(input_page, transform, expand=False)
+                # Merge page safely with clean transformation matrix
+                op_transform = Transformation().scale(scale, scale).translate(tx, ty)
+                sheet.merge_transformed_page(input_page, op_transform, expand=False)
                 
-                # Render trim marks
+                # Trim marks logic
                 if mark_style != "None":
                     mark_len = 12.0
                     offset = bleed + 3.0  
@@ -553,7 +558,7 @@ def execute_pdf_imposition(input_bytes, config):
         if len(mark_reader.pages) > 0:
             sheet.merge_page(mark_reader.pages[0], over=True, expand=False)
             
-        # --- STEP 4: HARD-LOCK OUTPUT PAGE BOUNDARIES ---
+        # --- FIX 3: HARD LOCK OUTPUT BOUNDING BOXES TO EXACT SHEET SIZE ---
         box_rect = RectangleObject([0, 0, media_w, media_h])
         sheet.mediabox = box_rect
         sheet.cropbox = box_rect
@@ -561,9 +566,22 @@ def execute_pdf_imposition(input_bytes, config):
         sheet.bleedbox = box_rect
         
         writer.add_page(sheet)
-        
+
+    # --- DEBUG: verify what actually got written to the output PDF ---
+    for i, p in enumerate(writer.pages):
+        mb = p.mediabox
+        print(f"[DEBUG] writer page {i} mediabox (pt):", mb.width, mb.height,
+              " -> mm:", float(mb.width) / MM_TO_PT, float(mb.height) / MM_TO_PT)
+
     output_stream = io.BytesIO()
     writer.write(output_stream)
+
+    # --- DEBUG: re-read the actual output bytes to catch any write-side corruption ---
+    verify = PdfReader(io.BytesIO(output_stream.getvalue()))
+    vmb = verify.pages[0].mediabox
+    print("[DEBUG] re-read output page 0 mediabox (mm):",
+          float(vmb.width) / MM_TO_PT, float(vmb.height) / MM_TO_PT)
+
     return output_stream.getvalue(), ups_per_page, round(last_computed_scale * 100.0, 1)
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
