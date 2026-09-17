@@ -390,10 +390,10 @@ def execute_pdf_imposition(input_bytes, config):
     from pypdf.generic import RectangleObject
     from reportlab.pdfgen import canvas
     
-    # 1 mm = 2.83464566929 PDF Points (72 / 25.4)
+    # Strictly lock 1 mm = 2.83464566929 PDF Points (72 / 25.4)
     MM_TO_PT = 72.0 / 25.4
     
-    # Parse dimensions and lock explicitly to points
+    # 1. Parse Dimensions and convert directly to Points
     media_w = float(config.get('media_w', 320.0)) * MM_TO_PT
     media_h = float(config.get('media_h', 450.0)) * MM_TO_PT
     
@@ -488,12 +488,13 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 input_page = page_pool[input_page_idx]
                 
-                # --- FIX 1: NORMALIZE SOURCE PAGE ORIGIN TO (0,0) ---
-                ll_x = float(input_page.mediabox.lower_left[0])
-                ll_y = float(input_page.mediabox.lower_left[1])
+                # --- STEP 1: READ ORIGINAL DIMENSIONS & ORIGIN OFFSETS ---
+                orig_ll_x = float(input_page.mediabox.lower_left[0])
+                orig_ll_y = float(input_page.mediabox.lower_left[1])
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
                 
+                # Grid positioning
                 if is_back_page:
                     c_eff = cols - 1 - c
                     x_pos = media_w - margin_right - (c_eff * step_x) - trim_w
@@ -512,15 +513,15 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 last_computed_scale = scale
                 
-                # --- FIX 2: ACCOUNT FOR ORIGINAL LOWER-LEFT SHIFTS ---
-                tx = x_pos - bleed + (target_w - (orig_w * scale)) / 2 - (ll_x * scale)
-                ty = y_pos - bleed + (target_h - (orig_h * scale)) / 2 - (ll_y * scale)
+                # --- STEP 2: CALCULATE TRANSLATION TO CANCEL OUT SOURCE ORIGIN OFFSETS ---
+                tx = (x_pos - bleed + (target_w - (orig_w * scale)) / 2) - (orig_ll_x * scale)
+                ty = (y_pos - bleed + (target_h - (orig_h * scale)) / 2) - (orig_ll_y * scale)
                 
-                # Merge page safely with clean transformation matrix
-                op_transform = Transformation().scale(scale, scale).translate(tx, ty)
-                sheet.merge_transformed_page(input_page, op_transform, expand=False)
+                # --- STEP 3: MERGE TRANSFORMED PAGE CLEANLY ---
+                transform = Transformation().scale(scale, scale).translate(tx, ty)
+                sheet.merge_transformed_page(input_page, transform, expand=False)
                 
-                # Trim marks logic
+                # Render trim marks
                 if mark_style != "None":
                     mark_len = 12.0
                     offset = bleed + 3.0  
@@ -552,7 +553,7 @@ def execute_pdf_imposition(input_bytes, config):
         if len(mark_reader.pages) > 0:
             sheet.merge_page(mark_reader.pages[0], over=True, expand=False)
             
-        # --- FIX 3: HARD LOCK OUTPUT BOUNDING BOXES TO EXACT SHEET SIZE ---
+        # --- STEP 4: HARD-LOCK OUTPUT PAGE BOUNDARIES ---
         box_rect = RectangleObject([0, 0, media_w, media_h])
         sheet.mediabox = box_rect
         sheet.cropbox = box_rect
