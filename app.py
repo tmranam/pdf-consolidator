@@ -650,7 +650,16 @@ if st.session_state.current_page == "impose":
         media_h_mm = st.number_input("Custom Sheet Height (mm):", min_value=50.0, max_value=2000.0, value=297.0, step=1.0)
         
         st.write("---")
-        repeat_per_page = st.number_input("How many up? (Repeats per design page):", min_value=1, max_value=1000, value=4, step=1)
+        st.markdown("**Grid Layout (Columns x Rows):**")
+        grid_col1, grid_col2 = st.columns(2)
+        with grid_col1:
+            cols_input = st.number_input("Columns:", min_value=1, max_value=100, value=2, step=1, key="cols_input_widget")
+        with grid_col2:
+            rows_input = st.number_input("Rows:", min_value=1, max_value=100, value=4, step=1, key="rows_input_widget")
+        
+        total_ups_preview = int(cols_input) * int(rows_input)
+        st.caption(f"➡️ This will place **{total_ups_preview}-up** per sheet ({int(cols_input)} cols x {int(rows_input)} rows).")
+        
         print_style = st.radio("Output Surface Type:", ["Simplex", "Duplex"], horizontal=True)
         layout_choice = st.radio("Step Sequencing Route Pattern:", ["Repeat / Step & Repeat", "Cut and Stack"], horizontal=False)
 
@@ -704,23 +713,23 @@ if st.session_state.current_page == "impose":
                     
                     # Generate dynamic configuration mapping dictionary parameters using custom dimensions
                     imposition_runtime_config = {
-    'media_w': media_w_mm,
-    'media_h': media_h_mm,
-    'trim_w': trim_w,
-    'trim_h': trim_h,
-    'bleed': bleed_w,
-    'gutter_x': gut_x,
-    'gutter_y': gut_y,
-    'cols': int(cols_input),   # <-- NEW
-    'rows': int(rows_input),   # <-- NEW
-    'margins': {'top': 25.0, 'bottom': 25.0, 'left': 25.0, 'right': 25.0},
-    'layout_mode': layout_choice,
-    'duplex': (print_style == "Duplex"),
-    'repeat_per_page': int(repeat_per_page),
-    'trim_marks_style': trim_style_selection,
-    'fit_to_size': fit_to_size_option,
-    'magnification_pct': float(magnification_pct) 
-}
+                        'media_w': media_w_mm,
+                        'media_h': media_h_mm,
+                        'trim_w': trim_w,
+                        'trim_h': trim_h,
+                        'bleed': bleed_w,
+                        'gutter_x': gut_x,
+                        'gutter_y': gut_y,
+                        'cols': int(cols_input),
+                        'rows': int(rows_input),
+                        'margins': {'top': 25.0, 'bottom': 25.0, 'left': 25.0, 'right': 25.0},
+                        'layout_mode': layout_choice,
+                        'duplex': (print_style == "Duplex"),
+                        'repeat_per_page': int(cols_input) * int(rows_input),
+                        'trim_marks_style': trim_style_selection,
+                        'fit_to_size': fit_to_size_option,
+                        'magnification_pct': float(magnification_pct) 
+                    }
                     
                     # Extract binary payload array values out of file uploader session memory
                     raw_input_bytes = uploaded_impose_pdf.read()
@@ -731,7 +740,7 @@ if st.session_state.current_page == "impose":
                     # Store computed values securely in session state background memory
                     st.session_state.system_auto_scale_feedback = computed_percentage
                     
-                    st.success(f"🎉 Imposition Matrix Calculated Successfully!")
+                    st.success(f"🎉 Imposition Matrix Calculated Successfully! ({total_calculated_ups}-up per sheet)")
                     
                     # Display real-time conversion summary messages
                     if fit_to_size_option:
@@ -744,7 +753,7 @@ if st.session_state.current_page == "impose":
                     st.download_button(
                         label=f"⬇️ Download Imposed Output File",
                         data=compiled_output_pdf,
-                        file_name=f"{base_name}_Imposed_{repeat_per_page}Up.pdf",
+                        file_name=f"{base_name}_Imposed_{total_calculated_ups}Up.pdf",
                         mime="application/pdf",
                         use_container_width=True
                     )
@@ -829,7 +838,6 @@ elif st.session_state.current_page == "duplicate":
                     file_name=out_filename,
                     mime="application/pdf",
                 )
-
 # ---------------------------------------------------------
 # PAGE 3: PDF STORE BATCH CONSOLIDATOR
 # ---------------------------------------------------------
