@@ -387,19 +387,24 @@ def execute_pdf_imposition(input_bytes, config):
     import math
     import io
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
+    from pypdf.generic import RectangleObject
     from reportlab.pdfgen import canvas
     
-    # 1 mm = 2.83464566929 PDF Points
+    # Strictly lock 1 millimeter to PDF points (72 points / inch)
     MM_TO_PT = 72.0 / 25.4
     
-    # Unit Conversions
-    media_w = float(config.get('media_w', 530)) * MM_TO_PT
-    media_h = float(config.get('media_h', 750)) * MM_TO_PT
-    trim_w = float(config.get('trim_w', 250)) * MM_TO_PT
-    trim_h = float(config.get('trim_h', 145)) * MM_TO_PT
-    bleed = float(config.get('bleed', 2.0)) * MM_TO_PT
-    gutter_x = float(config.get('gutter_x', 3.0)) * MM_TO_PT
-    gutter_y = float(config.get('gutter_y', 3.0)) * MM_TO_PT
+    # 1. Parse Dimensions and convert directly to Points
+    media_w_mm = float(config.get('media_w', 320.0))
+    media_h_mm = float(config.get('media_h', 450.0))
+    
+    media_w = media_w_mm * MM_TO_PT
+    media_h = media_h_mm * MM_TO_PT
+    
+    trim_w = float(config.get('trim_w', 250.0)) * MM_TO_PT
+    trim_h = float(config.get('trim_h', 145.0)) * MM_TO_PT
+    bleed = float(config.get('bleed', 0.0)) * MM_TO_PT
+    gutter_x = float(config.get('gutter_x', 0.0)) * MM_TO_PT
+    gutter_y = float(config.get('gutter_y', 0.0)) * MM_TO_PT
     
     margins = config.get('margins', {}) if isinstance(config.get('margins'), dict) else {}
     margin_left = float(margins.get('left', 0.0)) * MM_TO_PT
@@ -410,7 +415,7 @@ def execute_pdf_imposition(input_bytes, config):
     reader = PdfReader(io.BytesIO(input_bytes))
     layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
     
-    # Build Page Pool
+    # 2. Page Pool Setup
     if "Cut and Stack" in layout_mode:
         page_pool = list(reader.pages)
     else:
@@ -422,9 +427,9 @@ def execute_pdf_imposition(input_bytes, config):
             
     total_input_pages = len(page_pool)
     if total_input_pages == 0:
-        raise ValueError("The uploaded PDF file contains no valid pages.")
+        raise ValueError("Uploaded PDF has no printable pages.")
 
-    # Matrix Calculation
+    # 3. Calculate Layout Matrix
     avail_w = media_w - margin_left - margin_right
     avail_h = media_h - margin_top - margin_bottom
     
@@ -443,13 +448,13 @@ def execute_pdf_imposition(input_bytes, config):
     total_sheets = stack_depth
     writer = PdfWriter()
     
-    # Checkbox "Auto-Fit" status fallback
     fit_to_size = config.get('fit_to_size', True)
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     last_computed_scale = 1.0
     
+    # 4. Sheet Render Loop
     for sheet_idx in range(total_sheets):
-        # Create output sheet canvas
+        # Create sheet locked explicitly to media dimensions
         sheet = PageObject.create_blank_page(width=media_w, height=media_h)
         is_back_page = is_duplex and (sheet_idx % 2 == 1)
         
@@ -460,7 +465,7 @@ def execute_pdf_imposition(input_bytes, config):
             current_stack_layer = sheet_idx
             total_stack_layers = total_sheets
         
-        # Crop mark canvas buffer
+        # Crop mark overlay generator
         mark_packet = io.BytesIO()
         mark_can = canvas.Canvas(mark_packet, pagesize=(media_w, media_h))
         mark_can.setStrokeColorRGB(0, 0, 0) 
@@ -489,7 +494,7 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 input_page = page_pool[input_page_idx]
                 
-                # Grid coordinates calculation
+                # Dynamic coordinate matrix
                 if is_back_page:
                     c_eff = cols - 1 - c
                     x_pos = media_w - margin_right - (c_eff * step_x) - trim_w
@@ -511,15 +516,14 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 last_computed_scale = scale
                 
-                # Calculate direct translation offsets
                 tx = x_pos - bleed + (target_w - (orig_w * scale)) / 2
                 ty = y_pos - bleed + (target_h - (orig_h * scale)) / 2
                 
-                # Transformation matrix insertion
+                # Apply transformation without expanding base target page
                 op_transform = Transformation().scale(scale, scale).translate(tx, ty)
-                sheet.merge_transformed_page(input_page, op_transform)
+                sheet.merge_transformed_page(input_page, op_transform, expand=False)
                 
-                # Plot trim marks
+                # Render trim marks
                 if mark_style != "None":
                     mark_len = 12.0
                     offset = bleed + 3.0  
@@ -549,13 +553,14 @@ def execute_pdf_imposition(input_bytes, config):
         mark_packet.seek(0)
         mark_reader = PdfReader(mark_packet)
         if len(mark_reader.pages) > 0:
-            sheet.merge_page(mark_reader.pages[0], over=True)
+            sheet.merge_page(mark_reader.pages[0], over=True, expand=False)
             
-        # Hard-code explicit bounding boxes on the sheet page
-        sheet.mediabox.lower_left = (0, 0)
-        sheet.mediabox.upper_right = (media_w, media_h)
-        sheet.cropbox.lower_left = (0, 0)
-        sheet.cropbox.upper_right = (media_w, media_h)
+        # CRITICAL FIX: Lock the exact page boundary boxes to 320mm x 450mm dimensions
+        box_rect = RectangleObject([0, 0, media_w, media_h])
+        sheet.mediabox = box_rect
+        sheet.cropbox = box_rect
+        sheet.trimbox = box_rect
+        sheet.bleedbox = box_rect
         
         writer.add_page(sheet)
         
