@@ -393,15 +393,9 @@ def execute_pdf_imposition(input_bytes, config):
     # 1 mm = 2.83464566929 PDF Points (72 / 25.4)
     MM_TO_PT = 72.0 / 25.4
     
-    # --- DEBUG: show exactly what config this function received ---
-    print("[DEBUG] Full config received by execute_pdf_imposition:", config)
-    
     # Parse dimensions and lock explicitly to points
-    raw_media_w_mm = float(config.get('media_w', 320.0))
-    raw_media_h_mm = float(config.get('media_h', 450.0))
-    
-    media_w = raw_media_w_mm * MM_TO_PT
-    media_h = raw_media_h_mm * MM_TO_PT
+    media_w = float(config.get('media_w', 320.0)) * MM_TO_PT
+    media_h = float(config.get('media_h', 450.0)) * MM_TO_PT
     
     trim_w = float(config.get('trim_w', 250.0)) * MM_TO_PT
     trim_h = float(config.get('trim_h', 145.0)) * MM_TO_PT
@@ -415,13 +409,10 @@ def execute_pdf_imposition(input_bytes, config):
     margin_top = float(margins.get('top', 0.0)) * MM_TO_PT
     margin_bottom = float(margins.get('bottom', 0.0)) * MM_TO_PT
 
-    print(f"[DEBUG] raw_media_w_mm={raw_media_w_mm}, raw_media_h_mm={raw_media_h_mm}")
-    print(f"[DEBUG] media_w (pt)={media_w}, media_h (pt)={media_h}")
-    print(f"[DEBUG] media_w back-to-mm={media_w/MM_TO_PT}, media_h back-to-mm={media_h/MM_TO_PT}")
-
     reader = PdfReader(io.BytesIO(input_bytes))
     layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
     
+    # Build Page Pool
     if "Cut and Stack" in layout_mode:
         page_pool = list(reader.pages)
     else:
@@ -435,15 +426,46 @@ def execute_pdf_imposition(input_bytes, config):
     if total_input_pages == 0:
         raise ValueError("Uploaded PDF has no printable pages.")
 
+    # Calculate available printable area (sheet minus margins)
     avail_w = media_w - margin_left - margin_right
     avail_h = media_h - margin_top - margin_bottom
     
     step_x = trim_w + gutter_x
     step_y = trim_h + gutter_y
     
-    cols = max(1, int((avail_w + gutter_x) / step_x))
-    rows = max(1, int((avail_h + gutter_y) / step_y))
+    # --- COLUMNS / ROWS: use explicit config values if provided, else auto-calculate ---
+    config_cols = config.get('cols')
+    config_rows = config.get('rows')
+    
+    if config_cols is not None and int(config_cols) > 0:
+        cols = int(config_cols)
+    else:
+        cols = max(1, int((avail_w + gutter_x) / step_x))
+    
+    if config_rows is not None and int(config_rows) > 0:
+        rows = int(config_rows)
+    else:
+        rows = max(1, int((avail_h + gutter_y) / step_y))
+    
     ups_per_page = cols * rows
+    
+    # --- SAFETY CHECK: make sure the requested grid actually fits on the sheet ---
+    grid_w = (cols * trim_w) + ((cols - 1) * gutter_x)
+    grid_h = (rows * trim_h) + ((rows - 1) * gutter_y)
+    
+    if grid_w > avail_w + 0.01 or grid_h > avail_h + 0.01:
+        raise ValueError(
+            f"Requested layout of {cols} cols x {rows} rows does not fit on the sheet. "
+            f"Grid needs {grid_w/MM_TO_PT:.2f}mm x {grid_h/MM_TO_PT:.2f}mm, but only "
+            f"{avail_w/MM_TO_PT:.2f}mm x {avail_h/MM_TO_PT:.2f}mm is available "
+            f"(sheet size minus margins). Reduce cols/rows, trim size, gutters, or margins."
+        )
+    
+    # --- CENTERING OFFSETS: center the whole grid block within the printable area ---
+    center_offset_x = margin_left + (avail_w - grid_w) / 2.0
+    center_offset_y = margin_top + (avail_h - grid_h) / 2.0
+    # Mirrored offset for duplex back pages, measured from the right edge
+    center_offset_x_right = margin_right + (avail_w - grid_w) / 2.0
     
     stack_depth = math.ceil(total_input_pages / ups_per_page)
     is_duplex = config.get('duplex', False)
@@ -456,8 +478,6 @@ def execute_pdf_imposition(input_bytes, config):
     fit_to_size = config.get('fit_to_size', True)
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     last_computed_scale = 1.0
-    
-    print(f"[DEBUG] cols={cols}, rows={rows}, ups_per_page={ups_per_page}, fit_to_size={fit_to_size}")
     
     for sheet_idx in range(total_sheets):
         sheet = PageObject.create_blank_page(width=media_w, height=media_h)
@@ -498,21 +518,20 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 input_page = page_pool[input_page_idx]
                 
+                # --- FIX 1: NORMALIZE SOURCE PAGE ORIGIN TO (0,0) ---
                 ll_x = float(input_page.mediabox.lower_left[0])
                 ll_y = float(input_page.mediabox.lower_left[1])
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
                 
-                if sheet_idx == 0 and r == 0 and c == 0:
-                    print(f"[DEBUG] first source page size (pt): {orig_w} x {orig_h}  -> mm: {orig_w/MM_TO_PT} x {orig_h/MM_TO_PT}")
-                
+                # --- CENTERED POSITIONING ---
                 if is_back_page:
                     c_eff = cols - 1 - c
-                    x_pos = media_w - margin_right - (c_eff * step_x) - trim_w
+                    x_pos = media_w - center_offset_x_right - (c_eff * step_x) - trim_w
                 else:
-                    x_pos = margin_left + (c * step_x)
+                    x_pos = center_offset_x + (c * step_x)
                     
-                y_pos = media_h - margin_top - (r * step_y) - trim_h
+                y_pos = media_h - center_offset_y - (r * step_y) - trim_h
                 
                 target_w = trim_w + (2 * bleed)
                 target_h = trim_h + (2 * bleed)
@@ -524,12 +543,15 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 last_computed_scale = scale
                 
+                # --- FIX 2: ACCOUNT FOR ORIGINAL LOWER-LEFT SHIFTS ---
                 tx = x_pos - bleed + (target_w - (orig_w * scale)) / 2 - (ll_x * scale)
                 ty = y_pos - bleed + (target_h - (orig_h * scale)) / 2 - (ll_y * scale)
                 
+                # Merge page safely with clean transformation matrix
                 op_transform = Transformation().scale(scale, scale).translate(tx, ty)
                 sheet.merge_transformed_page(input_page, op_transform, expand=False)
                 
+                # Trim marks logic
                 if mark_style != "None":
                     mark_len = 12.0
                     offset = bleed + 3.0  
@@ -561,6 +583,7 @@ def execute_pdf_imposition(input_bytes, config):
         if len(mark_reader.pages) > 0:
             sheet.merge_page(mark_reader.pages[0], over=True, expand=False)
             
+        # --- FIX 3: HARD LOCK OUTPUT BOUNDING BOXES TO EXACT SHEET SIZE ---
         box_rect = RectangleObject([0, 0, media_w, media_h])
         sheet.mediabox = box_rect
         sheet.cropbox = box_rect
@@ -568,12 +591,7 @@ def execute_pdf_imposition(input_bytes, config):
         sheet.bleedbox = box_rect
         
         writer.add_page(sheet)
-
-    for i, p in enumerate(writer.pages):
-        mb = p.mediabox
-        print(f"[DEBUG] writer page {i} mediabox (pt):", mb.width, mb.height,
-              " -> mm:", float(mb.width) / MM_TO_PT, float(mb.height) / MM_TO_PT)
-
+        
     output_stream = io.BytesIO()
     writer.write(output_stream)
     return output_stream.getvalue(), ups_per_page, round(last_computed_scale * 100.0, 1)
@@ -686,21 +704,23 @@ if st.session_state.current_page == "impose":
                     
                     # Generate dynamic configuration mapping dictionary parameters using custom dimensions
                     imposition_runtime_config = {
-                        'media_w': media_w_mm,
-                        'media_h': media_h_mm,
-                        'trim_w': trim_w,
-                        'trim_h': trim_h,
-                        'bleed': bleed_w,
-                        'gutter_x': gut_x,
-                        'gutter_y': gut_y,
-                        'margins': {'top': 25.0, 'bottom': 25.0, 'left': 25.0, 'right': 25.0},
-                        'layout_mode': layout_choice,
-                        'duplex': (print_style == "Duplex"),
-                        'repeat_per_page': int(repeat_per_page),
-                        'trim_marks_style': trim_style_selection,
-                        'fit_to_size': fit_to_size_option,
-                        'magnification_pct': float(magnification_pct) 
-                    }
+    'media_w': media_w_mm,
+    'media_h': media_h_mm,
+    'trim_w': trim_w,
+    'trim_h': trim_h,
+    'bleed': bleed_w,
+    'gutter_x': gut_x,
+    'gutter_y': gut_y,
+    'cols': int(cols_input),   # <-- NEW
+    'rows': int(rows_input),   # <-- NEW
+    'margins': {'top': 25.0, 'bottom': 25.0, 'left': 25.0, 'right': 25.0},
+    'layout_mode': layout_choice,
+    'duplex': (print_style == "Duplex"),
+    'repeat_per_page': int(repeat_per_page),
+    'trim_marks_style': trim_style_selection,
+    'fit_to_size': fit_to_size_option,
+    'magnification_pct': float(magnification_pct) 
+}
                     
                     # Extract binary payload array values out of file uploader session memory
                     raw_input_bytes = uploaded_impose_pdf.read()
