@@ -625,7 +625,6 @@ with col5:
 
 st.divider()
 
-# ---------------------------------------------------------
 # PAGE 1: IMPOSE (FIXED INTERFACE BUTTON & ST.RERUN BUGS)
 # ---------------------------------------------------------
 if st.session_state.current_page == "impose":
@@ -698,6 +697,18 @@ if st.session_state.current_page == "impose":
             help="Outer Perimeter Only ensures that no marks cut into the middle of the sheet or cross over adjacent artwork cells."
         )
 
+    st.write("---")
+    st.markdown("**Sheet Margins (mm):**")
+    margin_col1, margin_col2, margin_col3, margin_col4 = st.columns(4)
+    with margin_col1:
+        margin_top_mm = st.number_input("Top:", min_value=0.0, max_value=200.0, value=25.0, step=1.0, key="margin_top_input")
+    with margin_col2:
+        margin_bottom_mm = st.number_input("Bottom:", min_value=0.0, max_value=200.0, value=25.0, step=1.0, key="margin_bottom_input")
+    with margin_col3:
+        margin_left_mm = st.number_input("Left:", min_value=0.0, max_value=200.0, value=25.0, step=1.0, key="margin_left_input")
+    with margin_col4:
+        margin_right_mm = st.number_input("Right:", min_value=0.0, max_value=200.0, value=25.0, step=1.0, key="margin_right_input")
+
     st.divider()
 
         # Form Submission Trigger Action Button Hook
@@ -722,7 +733,12 @@ if st.session_state.current_page == "impose":
                         'gutter_y': gut_y,
                         'cols': int(cols_input),
                         'rows': int(rows_input),
-                        'margins': {'top': 25.0, 'bottom': 25.0, 'left': 25.0, 'right': 25.0},
+                        'margins': {
+                            'top': margin_top_mm,
+                            'bottom': margin_bottom_mm,
+                            'left': margin_left_mm,
+                            'right': margin_right_mm,
+                        },
                         'layout_mode': layout_choice,
                         'duplex': (print_style == "Duplex"),
                         'repeat_per_page': int(cols_input) * int(rows_input),
