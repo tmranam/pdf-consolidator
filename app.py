@@ -393,9 +393,15 @@ def execute_pdf_imposition(input_bytes, config):
     # 1 mm = 2.83464566929 PDF Points (72 / 25.4)
     MM_TO_PT = 72.0 / 25.4
     
+    # --- DEBUG: show exactly what config this function received ---
+    print("[DEBUG] Full config received by execute_pdf_imposition:", config)
+    
     # Parse dimensions and lock explicitly to points
-    media_w = float(config.get('media_w', 320.0)) * MM_TO_PT
-    media_h = float(config.get('media_h', 450.0)) * MM_TO_PT
+    raw_media_w_mm = float(config.get('media_w', 320.0))
+    raw_media_h_mm = float(config.get('media_h', 450.0))
+    
+    media_w = raw_media_w_mm * MM_TO_PT
+    media_h = raw_media_h_mm * MM_TO_PT
     
     trim_w = float(config.get('trim_w', 250.0)) * MM_TO_PT
     trim_h = float(config.get('trim_h', 145.0)) * MM_TO_PT
@@ -409,11 +415,18 @@ def execute_pdf_imposition(input_bytes, config):
     margin_top = float(margins.get('top', 0.0)) * MM_TO_PT
     margin_bottom = float(margins.get('bottom', 0.0)) * MM_TO_PT
 
-    # --- DEBUG: confirm the incoming config and the computed point values ---
-    print("[DEBUG] raw config media_w/media_h:", config.get('media_w'), config.get('media_h'))
-    print("[DEBUG] MM_TO_PT:", MM_TO_PT)
-    print("[DEBUG] media_w (pt):", media_w, " -> back to mm:", media_w / MM_TO_PT)
-    print("[DEBUG] media_h (pt):", media_h, " -> back to mm:", media_h / MM_TO_PT)
+    # --- GUARD: catch a sheet size that's wildly larger than any sane press sheet ---
+    # A press sheet over 1500mm on either edge is almost certainly a units/config bug,
+    # not a real request. Fail loudly instead of silently generating a huge PDF.
+    MAX_SANE_SHEET_MM = 1500.0
+    if raw_media_w_mm > MAX_SANE_SHEET_MM or raw_media_h_mm > MAX_SANE_SHEET_MM:
+        raise ValueError(
+            f"Requested sheet size {raw_media_w_mm:.2f}mm x {raw_media_h_mm:.2f}mm looks wrong "
+            f"(exceeds {MAX_SANE_SHEET_MM}mm on an edge). This usually means 'media_w'/'media_h' "
+            f"in config were populated from the source PDF's own page size instead of the "
+            f"user-entered sheet dimensions. Check the upstream code that builds `config` "
+            f"before calling execute_pdf_imposition — config['media_w'] was: {config.get('media_w')}"
+        )
 
     reader = PdfReader(io.BytesIO(input_bytes))
     layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
@@ -567,7 +580,7 @@ def execute_pdf_imposition(input_bytes, config):
         
         writer.add_page(sheet)
 
-    # --- DEBUG: verify what actually got written to the output PDF ---
+    # --- DEBUG: verify what actually got written ---
     for i, p in enumerate(writer.pages):
         mb = p.mediabox
         print(f"[DEBUG] writer page {i} mediabox (pt):", mb.width, mb.height,
@@ -575,13 +588,6 @@ def execute_pdf_imposition(input_bytes, config):
 
     output_stream = io.BytesIO()
     writer.write(output_stream)
-
-    # --- DEBUG: re-read the actual output bytes to catch any write-side corruption ---
-    verify = PdfReader(io.BytesIO(output_stream.getvalue()))
-    vmb = verify.pages[0].mediabox
-    print("[DEBUG] re-read output page 0 mediabox (mm):",
-          float(vmb.width) / MM_TO_PT, float(vmb.height) / MM_TO_PT)
-
     return output_stream.getvalue(), ups_per_page, round(last_computed_scale * 100.0, 1)
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
