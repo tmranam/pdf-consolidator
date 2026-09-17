@@ -673,25 +673,26 @@ if st.session_state.current_page == "impose":
 
     st.divider()
 
-    # Form Submission Trigger Action Button Hook
+        # Form Submission Trigger Action Button Hook
     if st.button("Run Sheet Imposition Processing", type="primary", use_container_width=True):
         if not uploaded_impose_pdf:
             st.error("⚠️ Active source PDF file stream data must be staged before layout processing.")
         else:
             with st.spinner("Calculating layout transformations and packing pages..."):
                 try:
-                    # Conversion baseline ratio: 1 millimeter = 2.83465 PostScript desktop points
-                    MM_TO_PT = 2.83465
+                    # NOTE: execute_pdf_imposition() converts mm -> points internally.
+                    # Do NOT pre-convert here — pass raw millimeter values only,
+                    # otherwise dimensions get converted twice (mm -> pt -> "pt-as-mm").
                     
                     # Generate dynamic configuration mapping dictionary parameters using custom dimensions
                     imposition_runtime_config = {
-                        'media_w': media_w_mm * MM_TO_PT,
-                        'media_h': media_h_mm * MM_TO_PT,
-                        'trim_w': trim_w * MM_TO_PT,
-                        'trim_h': trim_h * MM_TO_PT,
-                        'bleed': bleed_w * MM_TO_PT,
-                        'gutter_x': gut_x * MM_TO_PT,
-                        'gutter_y': gut_y * MM_TO_PT,
+                        'media_w': media_w_mm,
+                        'media_h': media_h_mm,
+                        'trim_w': trim_w,
+                        'trim_h': trim_h,
+                        'bleed': bleed_w,
+                        'gutter_x': gut_x,
+                        'gutter_y': gut_y,
                         'margins': {'top': 25.0, 'bottom': 25.0, 'left': 25.0, 'right': 25.0},
                         'layout_mode': layout_choice,
                         'duplex': (print_style == "Duplex"),
@@ -730,8 +731,6 @@ if st.session_state.current_page == "impose":
                     
                 except Exception as ex_err:
                     st.error(f"An unexpected failure sequence broke the layout engine logic block execution path: {str(ex_err)}")
-
-
 # ---------------------------------------------------------
 # PAGE 2: DUPLICATE PAGES
 # ---------------------------------------------------------
