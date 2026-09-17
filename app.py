@@ -415,23 +415,13 @@ def execute_pdf_imposition(input_bytes, config):
     margin_top = float(margins.get('top', 0.0)) * MM_TO_PT
     margin_bottom = float(margins.get('bottom', 0.0)) * MM_TO_PT
 
-    # --- GUARD: catch a sheet size that's wildly larger than any sane press sheet ---
-    # A press sheet over 1500mm on either edge is almost certainly a units/config bug,
-    # not a real request. Fail loudly instead of silently generating a huge PDF.
-    MAX_SANE_SHEET_MM = 1500.0
-    if raw_media_w_mm > MAX_SANE_SHEET_MM or raw_media_h_mm > MAX_SANE_SHEET_MM:
-        raise ValueError(
-            f"Requested sheet size {raw_media_w_mm:.2f}mm x {raw_media_h_mm:.2f}mm looks wrong "
-            f"(exceeds {MAX_SANE_SHEET_MM}mm on an edge). This usually means 'media_w'/'media_h' "
-            f"in config were populated from the source PDF's own page size instead of the "
-            f"user-entered sheet dimensions. Check the upstream code that builds `config` "
-            f"before calling execute_pdf_imposition — config['media_w'] was: {config.get('media_w')}"
-        )
+    print(f"[DEBUG] raw_media_w_mm={raw_media_w_mm}, raw_media_h_mm={raw_media_h_mm}")
+    print(f"[DEBUG] media_w (pt)={media_w}, media_h (pt)={media_h}")
+    print(f"[DEBUG] media_w back-to-mm={media_w/MM_TO_PT}, media_h back-to-mm={media_h/MM_TO_PT}")
 
     reader = PdfReader(io.BytesIO(input_bytes))
     layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
     
-    # Build Page Pool
     if "Cut and Stack" in layout_mode:
         page_pool = list(reader.pages)
     else:
@@ -445,7 +435,6 @@ def execute_pdf_imposition(input_bytes, config):
     if total_input_pages == 0:
         raise ValueError("Uploaded PDF has no printable pages.")
 
-    # Calculate Layout Matrix
     avail_w = media_w - margin_left - margin_right
     avail_h = media_h - margin_top - margin_bottom
     
@@ -467,6 +456,8 @@ def execute_pdf_imposition(input_bytes, config):
     fit_to_size = config.get('fit_to_size', True)
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     last_computed_scale = 1.0
+    
+    print(f"[DEBUG] cols={cols}, rows={rows}, ups_per_page={ups_per_page}, fit_to_size={fit_to_size}")
     
     for sheet_idx in range(total_sheets):
         sheet = PageObject.create_blank_page(width=media_w, height=media_h)
@@ -507,11 +498,13 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 input_page = page_pool[input_page_idx]
                 
-                # --- FIX 1: NORMALIZE SOURCE PAGE ORIGIN TO (0,0) ---
                 ll_x = float(input_page.mediabox.lower_left[0])
                 ll_y = float(input_page.mediabox.lower_left[1])
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
+                
+                if sheet_idx == 0 and r == 0 and c == 0:
+                    print(f"[DEBUG] first source page size (pt): {orig_w} x {orig_h}  -> mm: {orig_w/MM_TO_PT} x {orig_h/MM_TO_PT}")
                 
                 if is_back_page:
                     c_eff = cols - 1 - c
@@ -531,15 +524,12 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 last_computed_scale = scale
                 
-                # --- FIX 2: ACCOUNT FOR ORIGINAL LOWER-LEFT SHIFTS ---
                 tx = x_pos - bleed + (target_w - (orig_w * scale)) / 2 - (ll_x * scale)
                 ty = y_pos - bleed + (target_h - (orig_h * scale)) / 2 - (ll_y * scale)
                 
-                # Merge page safely with clean transformation matrix
                 op_transform = Transformation().scale(scale, scale).translate(tx, ty)
                 sheet.merge_transformed_page(input_page, op_transform, expand=False)
                 
-                # Trim marks logic
                 if mark_style != "None":
                     mark_len = 12.0
                     offset = bleed + 3.0  
@@ -571,7 +561,6 @@ def execute_pdf_imposition(input_bytes, config):
         if len(mark_reader.pages) > 0:
             sheet.merge_page(mark_reader.pages[0], over=True, expand=False)
             
-        # --- FIX 3: HARD LOCK OUTPUT BOUNDING BOXES TO EXACT SHEET SIZE ---
         box_rect = RectangleObject([0, 0, media_w, media_h])
         sheet.mediabox = box_rect
         sheet.cropbox = box_rect
@@ -580,7 +569,6 @@ def execute_pdf_imposition(input_bytes, config):
         
         writer.add_page(sheet)
 
-    # --- DEBUG: verify what actually got written ---
     for i, p in enumerate(writer.pages):
         mb = p.mediabox
         print(f"[DEBUG] writer page {i} mediabox (pt):", mb.width, mb.height,
