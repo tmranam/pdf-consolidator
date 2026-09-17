@@ -389,7 +389,7 @@ def execute_pdf_imposition(input_bytes, config):
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
     from reportlab.pdfgen import canvas
     
-    # --- CONVERT MM TO PDF POINTS (1 mm = 2.83465 pt) ---
+    # --- CONVERT ALL FRONTEND MM INPUTS TO POINTS ---
     MM_TO_PT = 72.0 / 25.4
     
     media_w = float(config['media_w']) * MM_TO_PT
@@ -400,7 +400,6 @@ def execute_pdf_imposition(input_bytes, config):
     gutter_x = float(config.get('gutter_x', 0.0)) * MM_TO_PT
     gutter_y = float(config.get('gutter_y', 0.0)) * MM_TO_PT
     
-    # Extract margins safely (defaulting to 0 if not defined)
     margins = config.get('margins', {})
     margin_left = float(margins.get('left', 0.0)) * MM_TO_PT
     margin_right = float(margins.get('right', 0.0)) * MM_TO_PT
@@ -410,7 +409,6 @@ def execute_pdf_imposition(input_bytes, config):
     reader = PdfReader(io.BytesIO(input_bytes))
     layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
     
-    # --- PHASE 1: PAGE POOL BUILDING ---
     if "Cut and Stack" in layout_mode:
         page_pool = list(reader.pages)
     else:
@@ -422,7 +420,6 @@ def execute_pdf_imposition(input_bytes, config):
             
     total_input_pages = len(page_pool)
     
-    # --- PHASE 2: CALCULATE GRID LAYOUT ---
     avail_w = media_w - margin_left - margin_right
     avail_h = media_h - margin_top - margin_bottom
     
@@ -446,7 +443,6 @@ def execute_pdf_imposition(input_bytes, config):
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     last_computed_scale = 1.0
     
-    # --- PHASE 3: SHEET GENERATION ---
     for sheet_idx in range(total_sheets):
         sheet = PageObject.create_blank_page(width=media_w, height=media_h)
         is_back_page = is_duplex and (sheet_idx % 2 == 1)
@@ -458,7 +454,6 @@ def execute_pdf_imposition(input_bytes, config):
             current_stack_layer = sheet_idx
             total_stack_layers = total_sheets
         
-        # Trim marks overlay setup
         mark_packet = io.BytesIO()
         mark_can = canvas.Canvas(mark_packet, pagesize=(media_w, media_h))
         mark_can.setStrokeColorRGB(0, 0, 0) 
@@ -487,7 +482,6 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 input_page = page_pool[input_page_idx]
                 
-                # Dynamic coordinate positioning
                 if is_back_page:
                     c_eff = cols - 1 - c
                     x_pos = media_w - margin_right - (c_eff * step_x) - trim_w
@@ -502,6 +496,7 @@ def execute_pdf_imposition(input_bytes, config):
                 target_w = trim_w + (2 * bleed)
                 target_h = trim_h + (2 * bleed)
                 
+                # Dynamic scaling factor in points
                 if fit_to_size:
                     scale = min(target_w / orig_w, target_h / orig_h)
                 else:
@@ -512,46 +507,13 @@ def execute_pdf_imposition(input_bytes, config):
                 tx = x_pos - bleed + (target_w - (orig_w * scale)) / 2
                 ty = y_pos - bleed + (target_h - (orig_h * scale)) / 2
                 
-                # Apply transformation directly to duplicated input page object
                 transformed_page = PageObject.create_blank_page(width=media_w, height=media_h)
                 transformed_page.merge_page(input_page)
                 
                 transform = Transformation().scale(scale, scale).translate(tx, ty)
                 transformed_page.add_transformation(transform)
                 sheet.merge_page(transformed_page, over=True)
-                
-                # Trim mark plotting logic
-                if mark_style != "None":
-                    mark_len = 12.0
-                    offset = bleed + 3.0  
-                    x1, x2 = x_pos, x_pos + trim_w
-                    y1, y2 = y_pos, y_pos + trim_h
-                    
-                    is_left_edge = (c == 0) if not is_back_page else (c == cols - 1)
-                    is_right_edge = (c == cols - 1) if not is_back_page else (c == 0)
-                    is_top_edge = (r == 0)
-                    is_bottom_edge = (r == rows - 1)
-                    draw_all = (mark_style == "All Individual Items")
-                    
-                    if draw_all or (is_left_edge and is_top_edge):
-                        mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)
-                        mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)
-                    if draw_all or (is_right_edge and is_top_edge):
-                        mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)
-                        mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)
-                    if draw_all or (is_left_edge and is_bottom_edge):
-                        mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)
-                        mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)
-                    if draw_all or (is_right_edge and is_bottom_edge):
-                        mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
-                        mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
 
-        mark_can.save()
-        mark_packet.seek(0)
-        mark_reader = PdfReader(mark_packet)
-        if len(mark_reader.pages) > 0:
-            sheet.merge_page(mark_reader.pages[0], over=True)
-            
         writer.add_page(sheet)
         
     output_stream = io.BytesIO()
