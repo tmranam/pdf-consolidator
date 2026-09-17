@@ -628,7 +628,7 @@ if st.session_state.current_page == "impose":
     
     with col_imp1:
         st.markdown("**Output Media Sheet Footprint (mm):**")
-        media_w_mm = st.number_input("Custom Sheet Width (mmm):", min_value=50.0, max_value=2000.0, value=210.0, step=1.0)
+        media_w_mm = st.number_input("Custom Sheet Width (mm):", min_value=50.0, max_value=2000.0, value=210.0, step=1.0)
         media_h_mm = st.number_input("Custom Sheet Height (mm):", min_value=50.0, max_value=2000.0, value=297.0, step=1.0)
         
         st.write("---")
