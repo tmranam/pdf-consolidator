@@ -383,103 +383,103 @@ def create_labels_pdf(
     packet.seek(0)
     return packet
 
-# Helper function for dynamic PDF imposition engine (Fixed for true commercial Cut & Stack sorting)
 def execute_pdf_imposition(input_bytes, config):
     import math
     import io
     from pypdf import PdfReader, PdfWriter, PageObject, Transformation
     from reportlab.pdfgen import canvas
     
+    # --- CONVERT MM TO PDF POINTS (1 mm = 2.83465 pt) ---
+    MM_TO_PT = 72.0 / 25.4
+    
+    media_w = float(config['media_w']) * MM_TO_PT
+    media_h = float(config['media_h']) * MM_TO_PT
+    trim_w = float(config['trim_w']) * MM_TO_PT
+    trim_h = float(config['trim_h']) * MM_TO_PT
+    bleed = float(config.get('bleed', 0.0)) * MM_TO_PT
+    gutter_x = float(config.get('gutter_x', 0.0)) * MM_TO_PT
+    gutter_y = float(config.get('gutter_y', 0.0)) * MM_TO_PT
+    
+    # Extract margins safely (defaulting to 0 if not defined)
+    margins = config.get('margins', {})
+    margin_left = float(margins.get('left', 0.0)) * MM_TO_PT
+    margin_right = float(margins.get('right', 0.0)) * MM_TO_PT
+    margin_top = float(margins.get('top', 0.0)) * MM_TO_PT
+    margin_bottom = float(margins.get('bottom', 0.0)) * MM_TO_PT
+
     reader = PdfReader(io.BytesIO(input_bytes))
     layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
     
-    # --- PHASE 1: SEPARATE CLONING POOLS BY INTERFACE MODE ---
+    # --- PHASE 1: PAGE POOL BUILDING ---
     if "Cut and Stack" in layout_mode:
-        # Cut & Stack processes original unique pages sequentially through the pile
         page_pool = list(reader.pages)
     else:
-        # Step & Repeat clones each page N times before filling the matrix
         page_pool = []
-        repeat_count = config.get('repeat_per_page', 1)
+        repeat_count = int(config.get('repeat_per_page', 1))
         for original_page in reader.pages:
             for _ in range(repeat_count):
                 page_pool.append(original_page)
             
     total_input_pages = len(page_pool)
     
-    # Calculate dimensional limits inside available printable area
-    avail_w = config['media_w'] - config['margins']['left'] - config['margins']['right']
-    avail_h = config['media_h'] - config['margins']['top'] - config['margins']['bottom']
+    # --- PHASE 2: CALCULATE GRID LAYOUT ---
+    avail_w = media_w - margin_left - margin_right
+    avail_h = media_h - margin_top - margin_bottom
     
-    step_x = config['trim_w'] + config['gutter_x']
-    step_y = config['trim_h'] + config['gutter_y']
+    step_x = trim_w + gutter_x
+    step_y = trim_h + gutter_y
     
-    # Determine max rows/cols that physically fit on the sheet
-    cols = max(1, int((avail_w + config['gutter_x']) / step_x))
-    rows = max(1, int((avail_h + config['gutter_y']) / step_y))
+    cols = max(1, int((avail_w + gutter_x) / step_x))
+    rows = max(1, int((avail_h + gutter_y) / step_y))
     ups_per_page = cols * rows
     
-    # Calculate the exact stack depth (how many physical sheets are in the pile)
     stack_depth = math.ceil(total_input_pages / ups_per_page)
     
-    if config['duplex']:
-        # Duplex layouts process front/back signature sheet pairs, forcing an even sheet pile count
-        if stack_depth % 2 != 0:
-            stack_depth += 1
+    is_duplex = config.get('duplex', False)
+    if is_duplex and (stack_depth % 2 != 0):
+        stack_depth += 1
             
     total_sheets = stack_depth
-
     writer = PdfWriter()
     
-    # Check magnification and fit behavior configuration flags
     fit_to_size = config.get('fit_to_size', True)
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
-    
     last_computed_scale = 1.0
     
+    # --- PHASE 3: SHEET GENERATION ---
     for sheet_idx in range(total_sheets):
-        sheet = PageObject.create_blank_page(width=config['media_w'], height=config['media_h'])
+        sheet = PageObject.create_blank_page(width=media_w, height=media_h)
+        is_back_page = is_duplex and (sheet_idx % 2 == 1)
         
-        # In duplex mode, odd index sheets (1, 3, 5...) are back pages
-        is_back_page = config['duplex'] and (sheet_idx % 2 == 1)
-        
-        # For duplex printing, the back page must match the exact front sheet's grid index allocation
-        if config['duplex']:
+        if is_duplex:
             current_stack_layer = sheet_idx // 2
             total_stack_layers = total_sheets // 2
         else:
             current_stack_layer = sheet_idx
             total_stack_layers = total_sheets
         
-        # Prepare a transparent ReportLab canvas overlay for Trim Marks
+        # Trim marks overlay setup
         mark_packet = io.BytesIO()
-        mark_can = canvas.Canvas(mark_packet, pagesize=(config['media_w'], config['media_h']))
+        mark_can = canvas.Canvas(mark_packet, pagesize=(media_w, media_h))
         mark_can.setStrokeColorRGB(0, 0, 0) 
         mark_can.setLineWidth(0.5)          
-        
         mark_style = config.get('trim_marks_style', "None")
         
         for r in range(rows):
             for c in range(cols):
-                # --- TRUE COMMERCIAL CUT & STACK GRID PACKING LOOP ---
                 if "Cut and Stack" in layout_mode:
-                    if config['duplex']:
+                    if is_duplex:
                         if is_back_page:
-                            # Back pages back up the matching front grid position.
                             c_front = cols - 1 - c
                             grid_position_idx = (r * cols) + c_front
-                            # Back pages map to the matching front page index + 1
                             input_page_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2) + 1
                         else:
-                            # Front pages map to even positions through the stack height
                             grid_position_idx = (r * cols) + c
                             input_page_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2)
                     else:
-                        # Standard Simplex Cut & Stack mapping matrix
                         grid_position_idx = (r * cols) + c
                         input_page_idx = (grid_position_idx * total_stack_layers) + current_stack_layer
                 else:
-                    # Standard Step & Repeat sequence layout
                     input_page_idx = (sheet_idx * ups_per_page) + (r * cols + c)
                 
                 if input_page_idx >= total_input_pages:
@@ -487,24 +487,20 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 input_page = page_pool[input_page_idx]
                 
-                # Flip X-axis positions for back-page alignment on duplex templates
+                # Dynamic coordinate positioning
                 if is_back_page:
                     c_eff = cols - 1 - c
-                    x_pos = config['media_w'] - config['margins']['right'] - (c_eff * step_x) - config['trim_w']
+                    x_pos = media_w - margin_right - (c_eff * step_x) - trim_w
                 else:
-                    x_pos = config['margins']['left'] + (c * step_x)
+                    x_pos = margin_left + (c * step_x)
                     
-                y_pos = config['media_h'] - config['margins']['top'] - (r * step_y) - config['trim_h']
+                y_pos = media_h - margin_top - (r * step_y) - trim_h
                 
-                # Process placement and bleed scaling securely
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
                 
-                temp_page = PageObject.create_blank_page(width=orig_w, height=orig_h)
-                temp_page.merge_page(input_page, over=True)
-                
-                target_w = config['trim_w'] + (2 * config['bleed'])
-                target_h = config['trim_h'] + (2 * config['bleed'])
+                target_w = trim_w + (2 * bleed)
+                target_h = trim_h + (2 * bleed)
                 
                 if fit_to_size:
                     scale = min(target_w / orig_w, target_h / orig_h)
@@ -513,56 +509,43 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 last_computed_scale = scale
                 
-                tx = x_pos - config['bleed'] + (target_w - (orig_w * scale)) / 2
-                ty = y_pos - config['bleed'] + (target_h - (orig_h * scale)) / 2
+                tx = x_pos - bleed + (target_w - (orig_w * scale)) / 2
+                ty = y_pos - bleed + (target_h - (orig_h * scale)) / 2
+                
+                # Apply transformation directly to duplicated input page object
+                transformed_page = PageObject.create_blank_page(width=media_w, height=media_h)
+                transformed_page.merge_page(input_page)
                 
                 transform = Transformation().scale(scale, scale).translate(tx, ty)
-                temp_page.add_transformation(transform)
-                sheet.merge_page(temp_page, over=True)
+                transformed_page.add_transformation(transform)
+                sheet.merge_page(transformed_page, over=True)
                 
-                # --- GENERATE PHYSICAL TRIM MARKS OUTSIDE BLEED BOUNDS ---
+                # Trim mark plotting logic
                 if mark_style != "None":
                     mark_len = 12.0
-                    offset = config['bleed'] + 3.0  
-                    
-                    x1, x2 = x_pos, x_pos + config['trim_w']
-                    y1, y2 = y_pos, y_pos + config['trim_h']
+                    offset = bleed + 3.0  
+                    x1, x2 = x_pos, x_pos + trim_w
+                    y1, y2 = y_pos, y_pos + trim_h
                     
                     is_left_edge = (c == 0) if not is_back_page else (c == cols - 1)
                     is_right_edge = (c == cols - 1) if not is_back_page else (c == 0)
                     is_top_edge = (r == 0)
                     is_bottom_edge = (r == rows - 1)
-                    
                     draw_all = (mark_style == "All Individual Items")
                     
                     if draw_all or (is_left_edge and is_top_edge):
                         mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)
                         mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)
-                    elif mark_style == "Outer Perimeter Only":
-                        if is_top_edge: mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)
-                        if is_left_edge: mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)
-                        
                     if draw_all or (is_right_edge and is_top_edge):
                         mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)
                         mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)
-                    elif mark_style == "Outer Perimeter Only":
-                        if is_top_edge: mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)
-                        if is_right_edge: mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)
-                        
                     if draw_all or (is_left_edge and is_bottom_edge):
                         mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)
                         mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)
-                    elif mark_style == "Outer Perimeter Only":
-                        if is_bottom_edge: mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)
-                        if is_left_edge: mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)
-                        
                     if draw_all or (is_right_edge and is_bottom_edge):
                         mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
                         mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
-                    elif mark_style == "Outer Perimeter Only":
-                        if is_bottom_edge: mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
-                        if is_right_edge: mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
-                    
+
         mark_can.save()
         mark_packet.seek(0)
         mark_reader = PdfReader(mark_packet)
@@ -574,7 +557,6 @@ def execute_pdf_imposition(input_bytes, config):
     output_stream = io.BytesIO()
     writer.write(output_stream)
     return output_stream.getvalue(), ups_per_page, round(last_computed_scale * 100.0, 1)
-
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
 # ---------------------------------------------------------
