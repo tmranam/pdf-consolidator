@@ -519,7 +519,7 @@ if st.session_state.current_page == "impose":
 
     # 1. Primary Work File Dropzone
     uploaded_impose_pdf = st.file_uploader("Upload Target PDF File to Impose", type=["pdf"], key="impose_file_uploader")
-    
+
     st.divider()
 
     # --- Main layout: live preview (left) + all settings (right) ---
@@ -528,12 +528,12 @@ if st.session_state.current_page == "impose":
     with main_settings_col:
         st.markdown("#### 🛠️ Press Signature Configurations")
         col_imp1, col_imp2 = st.columns(2)
-        
+
         with col_imp1:
             st.markdown("**Output Media Sheet Footprint (mm):**")
             media_w_mm = st.number_input("Custom Sheet Width (mm):", min_value=50.0, max_value=2000.0, value=210.0, step=1.0)
             media_h_mm = st.number_input("Custom Sheet Height (mm):", min_value=50.0, max_value=2000.0, value=297.0, step=1.0)
-            
+
             st.write("---")
             st.markdown("**Grid Layout (Columns x Rows):**")
             grid_col1, grid_col2 = st.columns(2)
@@ -541,10 +541,10 @@ if st.session_state.current_page == "impose":
                 cols_input = st.number_input("Columns:", min_value=1, max_value=100, value=2, step=1, key="cols_input_widget")
             with grid_col2:
                 rows_input = st.number_input("Rows:", min_value=1, max_value=100, value=4, step=1, key="rows_input_widget")
-            
+
             total_ups_preview = int(cols_input) * int(rows_input)
             st.caption(f"➡️ This will place **{total_ups_preview}-up** per sheet ({int(cols_input)} cols x {int(rows_input)} rows).")
-            
+
             print_style = st.radio("Output Surface Type:", ["Simplex", "Duplex"], horizontal=True)
             layout_choice = st.radio("Step Sequencing Route Pattern:", ["Repeat / Step & Repeat", "Cut and Stack"], horizontal=False)
 
@@ -554,26 +554,26 @@ if st.session_state.current_page == "impose":
             bleed_w = st.number_input("Bleed Envelope Margin (mm):", min_value=0.0, max_value=25.0, value=2.0, step=0.5)
             gut_x = st.number_input("Horizontal Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
             gut_y = st.number_input("Vertical Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
-            
+
             st.write("---")
             fit_to_size_option = st.checkbox("Auto-Fit Content to Selected Trim Box?", value=True, help="When checked, automatically scales your design up or down to lock onto the trim size boundaries perfectly.")
-            
+
             if fit_to_size_option:
                 magnification_pct = st.number_input(
-                    f"Artwork Magnification Scale (%):", 
-                    min_value=10.0, max_value=200.0, 
-                    value=float(st.session_state.system_auto_scale_feedback), 
-                    step=1.0, disabled=True, 
+                    f"Artwork Magnification Scale (%):",
+                    min_value=10.0, max_value=200.0,
+                    value=float(st.session_state.system_auto_scale_feedback),
+                    step=1.0, disabled=True,
                     help="Showing the calculated scale ratio performed by the Auto-Fit layout machine framework."
                 )
             else:
                 magnification_pct = st.number_input(
-                    "Artwork Magnification Scale (%):", 
-                    min_value=10.0, max_value=200.0, 
-                    value=98.0, step=1.0, 
+                    "Artwork Magnification Scale (%):",
+                    min_value=10.0, max_value=200.0,
+                    value=98.0, step=1.0,
                     help="Type any precise manual percentage scale constraint layout size rule."
                 )
-                
+
             trim_style_selection = st.selectbox(
                 "Select Trim Marks Option style:",
                 ["Outer Perimeter Only", "All Individual Items", "None"],
@@ -596,13 +596,13 @@ if st.session_state.current_page == "impose":
         st.write("---")
         st.markdown("**Page Identifier (Counter):**")
         page_id_enabled = st.checkbox("Enable Page Identifier?", value=False, key="page_id_enabled_input")
-        
+
         if page_id_enabled:
             page_id_text = st.text_input(
                 "Custom Label Text:", value="File One", key="page_id_text_input",
                 help='This text is followed automatically by "Page X of N" — e.g. "File One Page 1 of 8".'
             )
-            
+
             id_col1, id_col2, id_col3 = st.columns(3)
             with id_col1:
                 page_id_font_size = st.number_input("Font Size (pt):", min_value=4.0, max_value=72.0, value=8.0, step=0.5, key="page_id_font_size_input")
@@ -610,7 +610,7 @@ if st.session_state.current_page == "impose":
                 page_id_margin = st.number_input("Margin from Edge (mm):", min_value=0.0, max_value=100.0, value=5.0, step=0.5, key="page_id_margin_input")
             with id_col3:
                 page_id_position = st.selectbox("Position on Sheet:", ["Top", "Bottom", "Left", "Right"], index=1, key="page_id_position_input")
-            
+
             page_id_sides = st.radio(
                 "Apply Identifier To:", ["Both Sides", "Front Only"], horizontal=True, key="page_id_sides_input",
                 help="For Duplex jobs: print the identifier on both the front and back of each sheet, or the front only."
@@ -622,7 +622,7 @@ if st.session_state.current_page == "impose":
             page_id_position = "Bottom"
             page_id_sides = "Both Sides"
 
-        with main_preview_col:
+    with main_preview_col:
         st.markdown("**Live Layout Preview:**")
         preview_svg = render_layout_preview(
             media_w_mm, media_h_mm, trim_w, trim_h,
@@ -633,6 +633,7 @@ if st.session_state.current_page == "impose":
         )
         st.markdown(preview_svg, unsafe_allow_html=True)
         st.caption("Blue = trim boxes, dotted red = bleed, dashed gray = margin boundary. Updates live as you adjust settings.")
+
     st.divider()
 
     # Form Submission Trigger Action Button Hook
@@ -671,20 +672,20 @@ if st.session_state.current_page == "impose":
                         'page_id_position': page_id_position,
                         'page_id_sides': page_id_sides,
                     }
-                    
+
                     raw_input_bytes = uploaded_impose_pdf.read()
-                    
+
                     compiled_output_pdf, total_calculated_ups, computed_percentage = execute_pdf_imposition(raw_input_bytes, imposition_runtime_config)
-                    
+
                     st.session_state.system_auto_scale_feedback = computed_percentage
-                    
+
                     st.success(f"🎉 Imposition Matrix Calculated Successfully! ({total_calculated_ups}-up per sheet)")
-                    
+
                     if fit_to_size_option:
                         st.info(f"📊 **Auto-Fit Metric:** Source artwork was automatically scaled to **{computed_percentage}%** of its original size to fit the requested trim window bounds.")
-                    
+
                     base_name = os.path.splitext(uploaded_impose_pdf.name)[0]
-                    
+
                     st.download_button(
                         label=f"⬇️ Download Imposed Output File",
                         data=compiled_output_pdf,
@@ -692,7 +693,7 @@ if st.session_state.current_page == "impose":
                         mime="application/pdf",
                         use_container_width=True
                     )
-                    
+
                 except Exception as ex_err:
                     st.error(f"An unexpected failure sequence broke the layout engine logic block execution path: {str(ex_err)}")
 # ---------------------------------------------------------
