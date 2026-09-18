@@ -387,14 +387,12 @@ def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
                            margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm,
                            cols, rows, page_id_enabled, page_id_position, page_id_text):
     """
-    Builds a live matplotlib diagram of the current sheet/grid settings, entirely
-    in millimeters — no PDF/artwork needed. Uses the SAME compute_grid_positions
-    helper as execute_pdf_imposition, so what you see here always matches the
-    real output geometry.
+    Builds a live SVG diagram of the current sheet/grid settings, entirely in
+    millimeters — no external plotting library needed. Uses the SAME
+    compute_grid_positions helper as execute_pdf_imposition, so what you see
+    here always matches the real output geometry.
+    Returns an SVG string (render with st.markdown(svg, unsafe_allow_html=True)).
     """
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
-
     geo = compute_grid_positions(
         media_w_mm, media_h_mm, trim_w_mm, trim_h_mm, gutter_x_mm, gutter_y_mm,
         margin_left_mm, margin_right_mm, margin_top_mm, margin_bottom_mm,
@@ -402,371 +400,83 @@ def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
     )
 
     fits = geo['grid_w'] <= geo['avail_w'] + 0.01 and geo['grid_h'] <= geo['avail_h'] + 0.01
+    grid_color = "#4a90d9" if fits else "#d94a4a"
 
-    fig, ax = plt.subplots(figsize=(4.5, 4.5 * (media_h_mm / media_w_mm) if media_w_mm > 0 else 4.5))
+    # Fit the sheet into a fixed-size canvas, preserving aspect ratio
+    canvas_w, canvas_h = 480, 480
+    pad = 20
+    scale = min((canvas_w - 2 * pad) / media_w_mm, (canvas_h - 2 * pad) / media_h_mm) if media_w_mm > 0 and media_h_mm > 0 else 1
+    offset_x, offset_y = pad, pad
+
+    def to_svg_xy(x_mm, y_mm):
+        # PDF-style y-up coords -> SVG y-down coords
+        svg_x = offset_x + x_mm * scale
+        svg_y = offset_y + (media_h_mm - y_mm) * scale
+        return svg_x, svg_y
+
+    svg_parts = []
+    svg_parts.append(f'<svg width="{canvas_w}" height="{canvas_h}" xmlns="http://www.w3.org/2000/svg" style="background:#fafafa;border:1px solid #ddd;">')
 
     # Sheet outline
-    ax.add_patch(patches.Rectangle((0, 0), media_w_mm, media_h_mm,
-                                    facecolor="#f2f2f2", edgecolor="black", linewidth=1.2))
+    sx, sy = to_svg_xy(0, media_h_mm)
+    svg_parts.append(
+        f'<rect x="{sx}" y="{sy}" width="{media_w_mm*scale}" height="{media_h_mm*scale}" '
+        f'fill="#f2f2f2" stroke="black" stroke-width="1.2" />'
+    )
 
     # Margin boundary (printable area), dashed
-    ax.add_patch(patches.Rectangle(
-        (margin_left_mm, margin_bottom_mm), geo['avail_w'], geo['avail_h'],
-        facecolor="none", edgecolor="#888888", linestyle="--", linewidth=0.8
-    ))
+    mx, my = to_svg_xy(margin_left_mm, media_h_mm - margin_top_mm)
+    svg_parts.append(
+        f'<rect x="{mx}" y="{my}" width="{geo["avail_w"]*scale}" height="{geo["avail_h"]*scale}" '
+        f'fill="none" stroke="#888888" stroke-width="0.8" stroke-dasharray="4,3" />'
+    )
 
-    # Grid cells
-    grid_color = "#4a90d9" if fits else "#d94a4a"
+    # Grid cells (trim boxes + bleed boxes)
     for pos in geo['positions']:
         x, y = pos['x'], pos['y']
-        # Trim box
-        ax.add_patch(patches.Rectangle((x, y), trim_w_mm, trim_h_mm,
-                                        facecolor=grid_color, alpha=0.35,
-                                        edgecolor=grid_color, linewidth=1.0))
-        # Bleed box (if any), dashed red outline extending past the trim box
+        tx, ty = to_svg_xy(x, y + trim_h_mm)  # top-left corner in mm -> svg
+        svg_parts.append(
+            f'<rect x="{tx}" y="{ty}" width="{trim_w_mm*scale}" height="{trim_h_mm*scale}" '
+            f'fill="{grid_color}" fill-opacity="0.35" stroke="{grid_color}" stroke-width="1.0" />'
+        )
         if bleed_mm > 0:
-            ax.add_patch(patches.Rectangle(
-                (x - bleed_mm, y - bleed_mm), trim_w_mm + 2 * bleed_mm, trim_h_mm + 2 * bleed_mm,
-                facecolor="none", edgecolor="red", linestyle=":", linewidth=0.6
-            ))
+            bx, by = to_svg_xy(x - bleed_mm, y + trim_h_mm + bleed_mm)
+            svg_parts.append(
+                f'<rect x="{bx}" y="{by}" width="{(trim_w_mm+2*bleed_mm)*scale}" height="{(trim_h_mm+2*bleed_mm)*scale}" '
+                f'fill="none" stroke="red" stroke-width="0.6" stroke-dasharray="2,2" />'
+            )
 
     # Page identifier indicator
     if page_id_enabled and page_id_text.strip() != "":
-        label = f'"{page_id_text.strip()} Page 1 of N"'
+        label = f'{page_id_text.strip()} Page 1 of N'
+        cx, _ = to_svg_xy(media_w_mm / 2.0, 0)
         if page_id_position == "Top":
-            ax.text(media_w_mm / 2, media_h_mm - 4, label, ha="center", va="top",
-                    fontsize=7, color="green")
+            _, ty2 = to_svg_xy(0, media_h_mm - 4)
+            svg_parts.append(f'<text x="{cx}" y="{ty2}" font-size="11" fill="green" text-anchor="middle">{label}</text>')
         elif page_id_position == "Bottom":
-            ax.text(media_w_mm / 2, 4, label, ha="center", va="bottom",
-                    fontsize=7, color="green")
+            _, by2 = to_svg_xy(0, 4)
+            svg_parts.append(f'<text x="{cx}" y="{by2}" font-size="11" fill="green" text-anchor="middle">{label}</text>')
         elif page_id_position == "Left":
-            ax.text(4, media_h_mm / 2, label, ha="left", va="center",
-                    fontsize=7, color="green", rotation=90)
+            lx, ly = to_svg_xy(4, media_h_mm / 2.0)
+            svg_parts.append(
+                f'<text x="{lx}" y="{ly}" font-size="11" fill="green" text-anchor="middle" '
+                f'transform="rotate(-90 {lx} {ly})">{label}</text>'
+            )
         elif page_id_position == "Right":
-            ax.text(media_w_mm - 4, media_h_mm / 2, label, ha="right", va="center",
-                    fontsize=7, color="green", rotation=-90)
+            rx, ry = to_svg_xy(media_w_mm - 4, media_h_mm / 2.0)
+            svg_parts.append(
+                f'<text x="{rx}" y="{ry}" font-size="11" fill="green" text-anchor="middle" '
+                f'transform="rotate(90 {rx} {ry})">{label}</text>'
+            )
 
-    ax.set_xlim(-10, media_w_mm + 10)
-    ax.set_ylim(-10, media_h_mm + 10)
-    ax.set_aspect("equal")
-    ax.axis("off")
-
-    title = f"{cols} x {rows} = {cols*rows}-up on {media_w_mm:.0f}x{media_h_mm:.0f}mm"
+    # Title / fit warning
+    title = f'{cols} x {rows} = {cols*rows}-up on {media_w_mm:.0f}x{media_h_mm:.0f}mm'
     if not fits:
-        title += "  ⚠️ DOES NOT FIT"
-    ax.set_title(title, fontsize=9)
+        title += "  \u26A0 DOES NOT FIT"
+    svg_parts.append(f'<text x="{canvas_w/2}" y="14" font-size="12" fill="#333" text-anchor="middle">{title}</text>')
 
-    plt.tight_layout()
-    return fig
-def compute_grid_positions(media_w, media_h, trim_w, trim_h, gutter_x, gutter_y,
-                            margin_left, margin_right, margin_top, margin_bottom,
-                            cols, rows):
-    """
-    Pure geometry helper — works in ANY consistent unit (mm or pt), since it only
-    depends on ratios/sums of the inputs. Used by both execute_pdf_imposition (pt)
-    and the on-screen layout preview (mm), so the two always stay perfectly in sync.
-
-    Returns a dict with:
-        positions: list of {row, col, x, y} — x,y = bottom-left corner of each
-                   trim box, measured from the sheet's bottom-left corner (0,0).
-        grid_w, grid_h: total footprint of the populated grid (no margins).
-        avail_w, avail_h: printable area (sheet minus margins).
-        center_offset_x/y: offsets used to center the grid within the margins.
-    """
-    avail_w = media_w - margin_left - margin_right
-    avail_h = media_h - margin_top - margin_bottom
-
-    step_x = trim_w + gutter_x
-    step_y = trim_h + gutter_y
-
-    grid_w = (cols * trim_w) + ((cols - 1) * gutter_x)
-    grid_h = (rows * trim_h) + ((rows - 1) * gutter_y)
-
-    center_offset_x = margin_left + (avail_w - grid_w) / 2.0
-    center_offset_y = margin_top + (avail_h - grid_h) / 2.0
-
-    positions = []
-    for r in range(rows):
-        for c in range(cols):
-            x = center_offset_x + (c * step_x)
-            y = media_h - center_offset_y - (r * step_y) - trim_h
-            positions.append({'row': r, 'col': c, 'x': x, 'y': y})
-
-    return {
-        'positions': positions,
-        'grid_w': grid_w,
-        'grid_h': grid_h,
-        'avail_w': avail_w,
-        'avail_h': avail_h,
-        'center_offset_x': center_offset_x,
-        'center_offset_y': center_offset_y,
-    }
-
-
-def execute_pdf_imposition(input_bytes, config):
-    import math
-    import io
-    from pypdf import PdfReader, PdfWriter, PageObject, Transformation
-    from pypdf.generic import RectangleObject
-    from reportlab.pdfgen import canvas
-    
-    # 1 mm = 2.83464566929 PDF Points (72 / 25.4)
-    MM_TO_PT = 72.0 / 25.4
-    
-    # Parse dimensions and lock explicitly to points
-    media_w = float(config.get('media_w', 320.0)) * MM_TO_PT
-    media_h = float(config.get('media_h', 450.0)) * MM_TO_PT
-    
-    trim_w = float(config.get('trim_w', 250.0)) * MM_TO_PT
-    trim_h = float(config.get('trim_h', 145.0)) * MM_TO_PT
-    bleed = float(config.get('bleed', 0.0)) * MM_TO_PT
-    gutter_x = float(config.get('gutter_x', 0.0)) * MM_TO_PT
-    gutter_y = float(config.get('gutter_y', 0.0)) * MM_TO_PT
-    
-    margins = config.get('margins', {}) if isinstance(config.get('margins'), dict) else {}
-    margin_left = float(margins.get('left', 0.0)) * MM_TO_PT
-    margin_right = float(margins.get('right', 0.0)) * MM_TO_PT
-    margin_top = float(margins.get('top', 0.0)) * MM_TO_PT
-    margin_bottom = float(margins.get('bottom', 0.0)) * MM_TO_PT
-
-    # --- Page Identifier config ---
-    page_id_enabled = config.get('page_id_enabled', False)
-    page_id_text = config.get('page_id_text', "")
-    page_id_font_size = float(config.get('page_id_font_size', 8.0))
-    page_id_margin = float(config.get('page_id_margin', 5.0)) * MM_TO_PT
-    page_id_position = config.get('page_id_position', "Bottom")  # Top/Bottom/Left/Right
-    page_id_sides = config.get('page_id_sides', "Both Sides")    # "Both Sides" / "Front Only"
-
-    reader = PdfReader(io.BytesIO(input_bytes))
-    layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
-    
-    # Build Page Pool
-    if "Cut and Stack" in layout_mode:
-        page_pool = list(reader.pages)
-    else:
-        page_pool = []
-        repeat_count = int(config.get('repeat_per_page', 1))
-        for original_page in reader.pages:
-            for _ in range(repeat_count):
-                page_pool.append(original_page)
-            
-    total_input_pages = len(page_pool)
-    if total_input_pages == 0:
-        raise ValueError("Uploaded PDF has no printable pages.")
-
-    # --- Use shared helper for grid geometry (front-side positions) ---
-    geo = compute_grid_positions(
-        media_w, media_h, trim_w, trim_h, gutter_x, gutter_y,
-        margin_left, margin_right, margin_top, margin_bottom,
-        int(config.get('cols') or 1), int(config.get('rows') or 1)
-    )
-
-    config_cols = config.get('cols')
-    config_rows = config.get('rows')
-    
-    avail_w = geo['avail_w']
-    avail_h = geo['avail_h']
-    step_x = trim_w + gutter_x
-    step_y = trim_h + gutter_y
-    
-    if config_cols is not None and int(config_cols) > 0:
-        cols = int(config_cols)
-    else:
-        cols = max(1, int((avail_w + gutter_x) / step_x))
-    
-    if config_rows is not None and int(config_rows) > 0:
-        rows = int(config_rows)
-    else:
-        rows = max(1, int((avail_h + gutter_y) / step_y))
-    
-    # Recompute geo now that cols/rows are finalized (in case they were auto-calculated above)
-    geo = compute_grid_positions(
-        media_w, media_h, trim_w, trim_h, gutter_x, gutter_y,
-        margin_left, margin_right, margin_top, margin_bottom,
-        cols, rows
-    )
-    grid_w = geo['grid_w']
-    grid_h = geo['grid_h']
-    center_offset_x = geo['center_offset_x']
-    center_offset_y = geo['center_offset_y']
-    
-    ups_per_page = cols * rows
-    
-    # --- SAFETY CHECK: make sure the requested grid actually fits on the sheet ---
-    if grid_w > avail_w + 0.01 or grid_h > avail_h + 0.01:
-        raise ValueError(
-            f"Requested layout of {cols} cols x {rows} rows does not fit on the sheet. "
-            f"Grid needs {grid_w/MM_TO_PT:.2f}mm x {grid_h/MM_TO_PT:.2f}mm, but only "
-            f"{avail_w/MM_TO_PT:.2f}mm x {avail_h/MM_TO_PT:.2f}mm is available "
-            f"(sheet size minus margins). Reduce cols/rows, trim size, gutters, or margins."
-        )
-    
-    # Mirrored offset for duplex back pages, measured from the right edge
-    center_offset_x_right = margin_right + (avail_w - grid_w) / 2.0
-    
-    stack_depth = math.ceil(total_input_pages / ups_per_page)
-    is_duplex = config.get('duplex', False)
-    if is_duplex and (stack_depth % 2 != 0):
-        stack_depth += 1
-            
-    total_sheets = stack_depth
-    # --- Physical sheet numbering: front+back of the same paper share one number ---
-    total_physical_sheets = (total_sheets // 2) if is_duplex else total_sheets
-    
-    writer = PdfWriter()
-    
-    fit_to_size = config.get('fit_to_size', True)
-    mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
-    last_computed_scale = 1.0
-    
-    for sheet_idx in range(total_sheets):
-        sheet = PageObject.create_blank_page(width=media_w, height=media_h)
-        is_back_page = is_duplex and (sheet_idx % 2 == 1)
-        
-        if is_duplex:
-            current_stack_layer = sheet_idx // 2
-            total_stack_layers = total_sheets // 2
-        else:
-            current_stack_layer = sheet_idx
-            total_stack_layers = total_sheets
-        
-        physical_sheet_number = (sheet_idx // 2) + 1 if is_duplex else sheet_idx + 1
-        
-        mark_packet = io.BytesIO()
-        mark_can = canvas.Canvas(mark_packet, pagesize=(media_w, media_h))
-        # Draw in pure CMYK black (K-plate only) — never RGB — to keep the file
-        # consistently CMYK end-to-end (see earlier CMYK fix).
-        mark_can.setStrokeColorCMYK(0, 0, 0, 1)
-        mark_can.setFillColorCMYK(0, 0, 0, 1)
-        mark_can.setLineWidth(0.5)          
-        mark_style = config.get('trim_marks_style', "None")
-        
-        for r in range(rows):
-            for c in range(cols):
-                if "Cut and Stack" in layout_mode:
-                    if is_duplex:
-                        if is_back_page:
-                            c_front = cols - 1 - c
-                            grid_position_idx = (r * cols) + c_front
-                            input_page_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2) + 1
-                        else:
-                            grid_position_idx = (r * cols) + c
-                            input_page_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2)
-                    else:
-                        grid_position_idx = (r * cols) + c
-                        input_page_idx = (grid_position_idx * total_stack_layers) + current_stack_layer
-                else:
-                    input_page_idx = (sheet_idx * ups_per_page) + (r * cols + c)
-                
-                if input_page_idx >= total_input_pages:
-                    continue
-                
-                input_page = page_pool[input_page_idx]
-                
-                # --- FIX 1: NORMALIZE SOURCE PAGE ORIGIN TO (0,0) ---
-                ll_x = float(input_page.mediabox.lower_left[0])
-                ll_y = float(input_page.mediabox.lower_left[1])
-                orig_w = float(input_page.mediabox.width)
-                orig_h = float(input_page.mediabox.height)
-                
-                # --- CENTERED POSITIONING ---
-                if is_back_page:
-                    c_eff = cols - 1 - c
-                    x_pos = media_w - center_offset_x_right - (c_eff * step_x) - trim_w
-                else:
-                    x_pos = center_offset_x + (c * step_x)
-                    
-                y_pos = media_h - center_offset_y - (r * step_y) - trim_h
-                
-                target_w = trim_w + (2 * bleed)
-                target_h = trim_h + (2 * bleed)
-                
-                if fit_to_size:
-                    scale = min(target_w / orig_w, target_h / orig_h)
-                else:
-                    scale = 1.0 * mag_factor
-                
-                last_computed_scale = scale
-                
-                # --- FIX 2: ACCOUNT FOR ORIGINAL LOWER-LEFT SHIFTS ---
-                tx = x_pos - bleed + (target_w - (orig_w * scale)) / 2 - (ll_x * scale)
-                ty = y_pos - bleed + (target_h - (orig_h * scale)) / 2 - (ll_y * scale)
-                
-                op_transform = Transformation().scale(scale, scale).translate(tx, ty)
-                sheet.merge_transformed_page(input_page, op_transform, expand=False)
-                
-                # Trim marks logic
-                if mark_style != "None":
-                    mark_len = 12.0
-                    offset = bleed + 3.0  
-                    x1, x2 = x_pos, x_pos + trim_w
-                    y1, y2 = y_pos, y_pos + trim_h
-                    
-                    is_left_edge = (c == 0) if not is_back_page else (c == cols - 1)
-                    is_right_edge = (c == cols - 1) if not is_back_page else (c == 0)
-                    is_top_edge = (r == 0)
-                    is_bottom_edge = (r == rows - 1)
-                    draw_all = (mark_style == "All Individual Items")
-                    
-                    if draw_all or (is_left_edge and is_top_edge):
-                        mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)
-                        mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)
-                    if draw_all or (is_right_edge and is_top_edge):
-                        mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)
-                        mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)
-                    if draw_all or (is_left_edge and is_bottom_edge):
-                        mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)
-                        mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)
-                    if draw_all or (is_right_edge and is_bottom_edge):
-                        mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
-                        mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
-
-        # --- PAGE IDENTIFIER: draw "{text} Page X of N" at the chosen edge ---
-        should_draw_id = page_id_enabled and page_id_text.strip() != ""
-        if should_draw_id and is_back_page and page_id_sides == "Front Only":
-            should_draw_id = False
-        
-        if should_draw_id:
-            id_string = f"{page_id_text.strip()} Page {physical_sheet_number} of {total_physical_sheets}"
-            mark_can.setFont("Helvetica", page_id_font_size)
-            
-            if page_id_position == "Top":
-                baseline_y = media_h - page_id_margin - page_id_font_size
-                mark_can.drawCentredString(media_w / 2.0, baseline_y, id_string)
-            elif page_id_position == "Bottom":
-                baseline_y = page_id_margin
-                mark_can.drawCentredString(media_w / 2.0, baseline_y, id_string)
-            elif page_id_position == "Left":
-                mark_can.saveState()
-                mark_can.translate(page_id_margin + page_id_font_size, media_h / 2.0)
-                mark_can.rotate(90)
-                mark_can.drawCentredString(0, 0, id_string)
-                mark_can.restoreState()
-            elif page_id_position == "Right":
-                mark_can.saveState()
-                mark_can.translate(media_w - page_id_margin - page_id_font_size, media_h / 2.0)
-                mark_can.rotate(-90)
-                mark_can.drawCentredString(0, 0, id_string)
-                mark_can.restoreState()
-
-        mark_can.save()
-        mark_packet.seek(0)
-        mark_reader = PdfReader(mark_packet)
-        if len(mark_reader.pages) > 0:
-            sheet.merge_page(mark_reader.pages[0], over=True, expand=False)
-            
-        # --- FIX 3: HARD LOCK OUTPUT BOUNDING BOXES TO EXACT SHEET SIZE ---
-        box_rect = RectangleObject([0, 0, media_w, media_h])
-        sheet.mediabox = box_rect
-        sheet.cropbox = box_rect
-        sheet.trimbox = box_rect
-        sheet.bleedbox = box_rect
-        
-        writer.add_page(sheet)
-        
-    output_stream = io.BytesIO()
-    writer.write(output_stream)
-    return output_stream.getvalue(), ups_per_page, round(last_computed_scale * 100.0, 1)
+    svg_parts.append('</svg>')
+    return "".join(svg_parts)
 # ---------------------------------------------------------
 # DASHBOARD NAVIGATION BAR
 # ---------------------------------------------------------
@@ -912,18 +622,17 @@ if st.session_state.current_page == "impose":
             page_id_position = "Bottom"
             page_id_sides = "Both Sides"
 
-    with main_preview_col:
+        with main_preview_col:
         st.markdown("**Live Layout Preview:**")
-        preview_fig = render_layout_preview(
+        preview_svg = render_layout_preview(
             media_w_mm, media_h_mm, trim_w, trim_h,
             bleed_w, gut_x, gut_y,
             margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm,
             int(cols_input), int(rows_input),
             page_id_enabled, page_id_position, page_id_text
         )
-        st.pyplot(preview_fig, use_container_width=True)
+        st.markdown(preview_svg, unsafe_allow_html=True)
         st.caption("Blue = trim boxes, dotted red = bleed, dashed gray = margin boundary. Updates live as you adjust settings.")
-
     st.divider()
 
     # Form Submission Trigger Action Button Hook
