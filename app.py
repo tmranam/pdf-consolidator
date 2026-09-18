@@ -383,6 +383,51 @@ def create_labels_pdf(
     packet.seek(0)
     return packet
 
+def compute_grid_positions(media_w, media_h, trim_w, trim_h, gutter_x, gutter_y,
+                            margin_left, margin_right, margin_top, margin_bottom,
+                            cols, rows):
+    """
+    Pure geometry helper — works in ANY consistent unit (mm or pt), since it only
+    depends on ratios/sums of the inputs. Used by both execute_pdf_imposition (pt)
+    and the on-screen layout preview (mm), so the two always stay perfectly in sync.
+
+    Returns a dict with:
+        positions: list of {row, col, x, y} — x,y = bottom-left corner of each
+                   trim box, measured from the sheet's bottom-left corner (0,0).
+        grid_w, grid_h: total footprint of the populated grid (no margins).
+        avail_w, avail_h: printable area (sheet minus margins).
+        center_offset_x/y: offsets used to center the grid within the margins.
+    """
+    avail_w = media_w - margin_left - margin_right
+    avail_h = media_h - margin_top - margin_bottom
+
+    step_x = trim_w + gutter_x
+    step_y = trim_h + gutter_y
+
+    grid_w = (cols * trim_w) + ((cols - 1) * gutter_x)
+    grid_h = (rows * trim_h) + ((rows - 1) * gutter_y)
+
+    center_offset_x = margin_left + (avail_w - grid_w) / 2.0
+    center_offset_y = margin_top + (avail_h - grid_h) / 2.0
+
+    positions = []
+    for r in range(rows):
+        for c in range(cols):
+            x = center_offset_x + (c * step_x)
+            y = media_h - center_offset_y - (r * step_y) - trim_h
+            positions.append({'row': r, 'col': c, 'x': x, 'y': y})
+
+    return {
+        'positions': positions,
+        'grid_w': grid_w,
+        'grid_h': grid_h,
+        'avail_w': avail_w,
+        'avail_h': avail_h,
+        'center_offset_x': center_offset_x,
+        'center_offset_y': center_offset_y,
+    }
+
+
 def execute_pdf_imposition(input_bytes, config):
     import math
     import io
@@ -409,6 +454,14 @@ def execute_pdf_imposition(input_bytes, config):
     margin_top = float(margins.get('top', 0.0)) * MM_TO_PT
     margin_bottom = float(margins.get('bottom', 0.0)) * MM_TO_PT
 
+    # --- Page Identifier config ---
+    page_id_enabled = config.get('page_id_enabled', False)
+    page_id_text = config.get('page_id_text', "")
+    page_id_font_size = float(config.get('page_id_font_size', 8.0))
+    page_id_margin = float(config.get('page_id_margin', 5.0)) * MM_TO_PT
+    page_id_position = config.get('page_id_position', "Bottom")  # Top/Bottom/Left/Right
+    page_id_sides = config.get('page_id_sides', "Both Sides")    # "Both Sides" / "Front Only"
+
     reader = PdfReader(io.BytesIO(input_bytes))
     layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
     
@@ -426,16 +479,20 @@ def execute_pdf_imposition(input_bytes, config):
     if total_input_pages == 0:
         raise ValueError("Uploaded PDF has no printable pages.")
 
-    # Calculate available printable area (sheet minus margins)
-    avail_w = media_w - margin_left - margin_right
-    avail_h = media_h - margin_top - margin_bottom
-    
-    step_x = trim_w + gutter_x
-    step_y = trim_h + gutter_y
-    
-    # --- COLUMNS / ROWS: use explicit config values if provided, else auto-calculate ---
+    # --- Use shared helper for grid geometry (front-side positions) ---
+    geo = compute_grid_positions(
+        media_w, media_h, trim_w, trim_h, gutter_x, gutter_y,
+        margin_left, margin_right, margin_top, margin_bottom,
+        int(config.get('cols') or 1), int(config.get('rows') or 1)
+    )
+
     config_cols = config.get('cols')
     config_rows = config.get('rows')
+    
+    avail_w = geo['avail_w']
+    avail_h = geo['avail_h']
+    step_x = trim_w + gutter_x
+    step_y = trim_h + gutter_y
     
     if config_cols is not None and int(config_cols) > 0:
         cols = int(config_cols)
@@ -447,12 +504,20 @@ def execute_pdf_imposition(input_bytes, config):
     else:
         rows = max(1, int((avail_h + gutter_y) / step_y))
     
+    # Recompute geo now that cols/rows are finalized (in case they were auto-calculated above)
+    geo = compute_grid_positions(
+        media_w, media_h, trim_w, trim_h, gutter_x, gutter_y,
+        margin_left, margin_right, margin_top, margin_bottom,
+        cols, rows
+    )
+    grid_w = geo['grid_w']
+    grid_h = geo['grid_h']
+    center_offset_x = geo['center_offset_x']
+    center_offset_y = geo['center_offset_y']
+    
     ups_per_page = cols * rows
     
     # --- SAFETY CHECK: make sure the requested grid actually fits on the sheet ---
-    grid_w = (cols * trim_w) + ((cols - 1) * gutter_x)
-    grid_h = (rows * trim_h) + ((rows - 1) * gutter_y)
-    
     if grid_w > avail_w + 0.01 or grid_h > avail_h + 0.01:
         raise ValueError(
             f"Requested layout of {cols} cols x {rows} rows does not fit on the sheet. "
@@ -461,9 +526,7 @@ def execute_pdf_imposition(input_bytes, config):
             f"(sheet size minus margins). Reduce cols/rows, trim size, gutters, or margins."
         )
     
-    # --- CENTERING OFFSETS: center the whole grid block within the printable area ---
-    center_offset_x = margin_left + (avail_w - grid_w) / 2.0
-    center_offset_y = margin_top + (avail_h - grid_h) / 2.0
+    # Mirrored offset for duplex back pages, measured from the right edge
     center_offset_x_right = margin_right + (avail_w - grid_w) / 2.0
     
     stack_depth = math.ceil(total_input_pages / ups_per_page)
@@ -472,6 +535,9 @@ def execute_pdf_imposition(input_bytes, config):
         stack_depth += 1
             
     total_sheets = stack_depth
+    # --- Physical sheet numbering: front+back of the same paper share one number ---
+    total_physical_sheets = (total_sheets // 2) if is_duplex else total_sheets
+    
     writer = PdfWriter()
     
     fit_to_size = config.get('fit_to_size', True)
@@ -489,11 +555,14 @@ def execute_pdf_imposition(input_bytes, config):
             current_stack_layer = sheet_idx
             total_stack_layers = total_sheets
         
+        physical_sheet_number = (sheet_idx // 2) + 1 if is_duplex else sheet_idx + 1
+        
         mark_packet = io.BytesIO()
         mark_can = canvas.Canvas(mark_packet, pagesize=(media_w, media_h))
-        # --- CMYK FIX: draw trim marks in pure CMYK (0,0,0,1 = pure black on the K plate only),
-        # instead of DeviceRGB, so no RGB colorspace gets introduced into an otherwise CMYK file.
+        # Draw in pure CMYK black (K-plate only) — never RGB — to keep the file
+        # consistently CMYK end-to-end (see earlier CMYK fix).
         mark_can.setStrokeColorCMYK(0, 0, 0, 1)
+        mark_can.setFillColorCMYK(0, 0, 0, 1)
         mark_can.setLineWidth(0.5)          
         mark_style = config.get('trim_marks_style', "None")
         
@@ -548,10 +617,6 @@ def execute_pdf_imposition(input_bytes, config):
                 tx = x_pos - bleed + (target_w - (orig_w * scale)) / 2 - (ll_x * scale)
                 ty = y_pos - bleed + (target_h - (orig_h * scale)) / 2 - (ll_y * scale)
                 
-                # Merge page safely with clean transformation matrix
-                # NOTE: merge_transformed_page copies the source XObject/content stream as-is —
-                # it does NOT re-encode or flatten colors. Whatever colorspace your artwork was
-                # authored in (CMYK, Separation, RGB) is preserved unchanged in the output.
                 op_transform = Transformation().scale(scale, scale).translate(tx, ty)
                 sheet.merge_transformed_page(input_page, op_transform, expand=False)
                 
@@ -580,6 +645,34 @@ def execute_pdf_imposition(input_bytes, config):
                     if draw_all or (is_right_edge and is_bottom_edge):
                         mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
                         mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
+
+        # --- PAGE IDENTIFIER: draw "{text} Page X of N" at the chosen edge ---
+        should_draw_id = page_id_enabled and page_id_text.strip() != ""
+        if should_draw_id and is_back_page and page_id_sides == "Front Only":
+            should_draw_id = False
+        
+        if should_draw_id:
+            id_string = f"{page_id_text.strip()} Page {physical_sheet_number} of {total_physical_sheets}"
+            mark_can.setFont("Helvetica", page_id_font_size)
+            
+            if page_id_position == "Top":
+                baseline_y = media_h - page_id_margin - page_id_font_size
+                mark_can.drawCentredString(media_w / 2.0, baseline_y, id_string)
+            elif page_id_position == "Bottom":
+                baseline_y = page_id_margin
+                mark_can.drawCentredString(media_w / 2.0, baseline_y, id_string)
+            elif page_id_position == "Left":
+                mark_can.saveState()
+                mark_can.translate(page_id_margin + page_id_font_size, media_h / 2.0)
+                mark_can.rotate(90)
+                mark_can.drawCentredString(0, 0, id_string)
+                mark_can.restoreState()
+            elif page_id_position == "Right":
+                mark_can.saveState()
+                mark_can.translate(media_w - page_id_margin - page_id_font_size, media_h / 2.0)
+                mark_can.rotate(-90)
+                mark_can.drawCentredString(0, 0, id_string)
+                mark_can.restoreState()
 
         mark_can.save()
         mark_packet.seek(0)
