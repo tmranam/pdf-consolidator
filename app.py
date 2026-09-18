@@ -382,7 +382,82 @@ def create_labels_pdf(
     can.save()
     packet.seek(0)
     return packet
+def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
+                           bleed_mm, gutter_x_mm, gutter_y_mm,
+                           margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm,
+                           cols, rows, page_id_enabled, page_id_position, page_id_text):
+    """
+    Builds a live matplotlib diagram of the current sheet/grid settings, entirely
+    in millimeters — no PDF/artwork needed. Uses the SAME compute_grid_positions
+    helper as execute_pdf_imposition, so what you see here always matches the
+    real output geometry.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
 
+    geo = compute_grid_positions(
+        media_w_mm, media_h_mm, trim_w_mm, trim_h_mm, gutter_x_mm, gutter_y_mm,
+        margin_left_mm, margin_right_mm, margin_top_mm, margin_bottom_mm,
+        cols, rows
+    )
+
+    fits = geo['grid_w'] <= geo['avail_w'] + 0.01 and geo['grid_h'] <= geo['avail_h'] + 0.01
+
+    fig, ax = plt.subplots(figsize=(4.5, 4.5 * (media_h_mm / media_w_mm) if media_w_mm > 0 else 4.5))
+
+    # Sheet outline
+    ax.add_patch(patches.Rectangle((0, 0), media_w_mm, media_h_mm,
+                                    facecolor="#f2f2f2", edgecolor="black", linewidth=1.2))
+
+    # Margin boundary (printable area), dashed
+    ax.add_patch(patches.Rectangle(
+        (margin_left_mm, margin_bottom_mm), geo['avail_w'], geo['avail_h'],
+        facecolor="none", edgecolor="#888888", linestyle="--", linewidth=0.8
+    ))
+
+    # Grid cells
+    grid_color = "#4a90d9" if fits else "#d94a4a"
+    for pos in geo['positions']:
+        x, y = pos['x'], pos['y']
+        # Trim box
+        ax.add_patch(patches.Rectangle((x, y), trim_w_mm, trim_h_mm,
+                                        facecolor=grid_color, alpha=0.35,
+                                        edgecolor=grid_color, linewidth=1.0))
+        # Bleed box (if any), dashed red outline extending past the trim box
+        if bleed_mm > 0:
+            ax.add_patch(patches.Rectangle(
+                (x - bleed_mm, y - bleed_mm), trim_w_mm + 2 * bleed_mm, trim_h_mm + 2 * bleed_mm,
+                facecolor="none", edgecolor="red", linestyle=":", linewidth=0.6
+            ))
+
+    # Page identifier indicator
+    if page_id_enabled and page_id_text.strip() != "":
+        label = f'"{page_id_text.strip()} Page 1 of N"'
+        if page_id_position == "Top":
+            ax.text(media_w_mm / 2, media_h_mm - 4, label, ha="center", va="top",
+                    fontsize=7, color="green")
+        elif page_id_position == "Bottom":
+            ax.text(media_w_mm / 2, 4, label, ha="center", va="bottom",
+                    fontsize=7, color="green")
+        elif page_id_position == "Left":
+            ax.text(4, media_h_mm / 2, label, ha="left", va="center",
+                    fontsize=7, color="green", rotation=90)
+        elif page_id_position == "Right":
+            ax.text(media_w_mm - 4, media_h_mm / 2, label, ha="right", va="center",
+                    fontsize=7, color="green", rotation=-90)
+
+    ax.set_xlim(-10, media_w_mm + 10)
+    ax.set_ylim(-10, media_h_mm + 10)
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    title = f"{cols} x {rows} = {cols*rows}-up on {media_w_mm:.0f}x{media_h_mm:.0f}mm"
+    if not fits:
+        title += "  ⚠️ DOES NOT FIT"
+    ax.set_title(title, fontsize=9)
+
+    plt.tight_layout()
+    return fig
 def compute_grid_positions(media_w, media_h, trim_w, trim_h, gutter_x, gutter_y,
                             margin_left, margin_right, margin_top, margin_bottom,
                             cols, rows):
