@@ -464,7 +464,6 @@ def execute_pdf_imposition(input_bytes, config):
     # --- CENTERING OFFSETS: center the whole grid block within the printable area ---
     center_offset_x = margin_left + (avail_w - grid_w) / 2.0
     center_offset_y = margin_top + (avail_h - grid_h) / 2.0
-    # Mirrored offset for duplex back pages, measured from the right edge
     center_offset_x_right = margin_right + (avail_w - grid_w) / 2.0
     
     stack_depth = math.ceil(total_input_pages / ups_per_page)
@@ -492,7 +491,9 @@ def execute_pdf_imposition(input_bytes, config):
         
         mark_packet = io.BytesIO()
         mark_can = canvas.Canvas(mark_packet, pagesize=(media_w, media_h))
-        mark_can.setStrokeColorRGB(0, 0, 0) 
+        # --- CMYK FIX: draw trim marks in pure CMYK (0,0,0,1 = pure black on the K plate only),
+        # instead of DeviceRGB, so no RGB colorspace gets introduced into an otherwise CMYK file.
+        mark_can.setStrokeColorCMYK(0, 0, 0, 1)
         mark_can.setLineWidth(0.5)          
         mark_style = config.get('trim_marks_style', "None")
         
@@ -548,6 +549,9 @@ def execute_pdf_imposition(input_bytes, config):
                 ty = y_pos - bleed + (target_h - (orig_h * scale)) / 2 - (ll_y * scale)
                 
                 # Merge page safely with clean transformation matrix
+                # NOTE: merge_transformed_page copies the source XObject/content stream as-is —
+                # it does NOT re-encode or flatten colors. Whatever colorspace your artwork was
+                # authored in (CMYK, Separation, RGB) is preserved unchanged in the output.
                 op_transform = Transformation().scale(scale, scale).translate(tx, ty)
                 sheet.merge_transformed_page(input_page, op_transform, expand=False)
                 
