@@ -811,90 +811,128 @@ if st.session_state.current_page == "impose":
     uploaded_impose_pdf = st.file_uploader("Upload Target PDF File to Impose", type=["pdf"], key="impose_file_uploader")
     
     st.divider()
-    
-    st.markdown("#### 🛠️ Press Signature Configurations")
-    col_imp1, col_imp2 = st.columns(2)
-    
-    with col_imp1:
-        st.markdown("**Output Media Sheet Footprint (mm):**")
-        media_w_mm = st.number_input("Custom Sheet Width (mm):", min_value=50.0, max_value=2000.0, value=210.0, step=1.0)
-        media_h_mm = st.number_input("Custom Sheet Height (mm):", min_value=50.0, max_value=2000.0, value=297.0, step=1.0)
-        
-        st.write("---")
-        st.markdown("**Grid Layout (Columns x Rows):**")
-        grid_col1, grid_col2 = st.columns(2)
-        with grid_col1:
-            cols_input = st.number_input("Columns:", min_value=1, max_value=100, value=2, step=1, key="cols_input_widget")
-        with grid_col2:
-            rows_input = st.number_input("Rows:", min_value=1, max_value=100, value=4, step=1, key="rows_input_widget")
-        
-        total_ups_preview = int(cols_input) * int(rows_input)
-        st.caption(f"➡️ This will place **{total_ups_preview}-up** per sheet ({int(cols_input)} cols x {int(rows_input)} rows).")
-        
-        print_style = st.radio("Output Surface Type:", ["Simplex", "Duplex"], horizontal=True)
-        layout_choice = st.radio("Step Sequencing Route Pattern:", ["Repeat / Step & Repeat", "Cut and Stack"], horizontal=False)
 
-    with col_imp2:
-        trim_w = st.number_input("Finished Trim Width (mm):", min_value=5.0, max_value=500.0, value=90.0, step=0.5)
-        trim_h = st.number_input("Finished Trim Height (mm):", min_value=5.0, max_value=500.0, value=55.0, step=0.5)
-        bleed_w = st.number_input("Bleed Envelope Margin (mm):", min_value=0.0, max_value=25.0, value=2.0, step=0.5)
-        gut_x = st.number_input("Horizontal Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
-        gut_y = st.number_input("Vertical Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+    # --- Main layout: live preview (left) + all settings (right) ---
+    main_preview_col, main_settings_col = st.columns([1, 2])
+
+    with main_settings_col:
+        st.markdown("#### 🛠️ Press Signature Configurations")
+        col_imp1, col_imp2 = st.columns(2)
         
-        st.write("---")
-        fit_to_size_option = st.checkbox("Auto-Fit Content to Selected Trim Box?", value=True, help="When checked, automatically scales your design up or down to lock onto the trim size boundaries perfectly.")
-        
-        # --- DYNAMIC MAGNIFICATION INTERFACE VIEW UPDATE MATRIX ---
-        if fit_to_size_option:
-            # Displays the auto-calculated magnification percentage inside the grayed-out number input box
-            magnification_pct = st.number_input(
-                f"Artwork Magnification Scale (%):", 
-                min_value=10.0, max_value=200.0, 
-                value=float(st.session_state.system_auto_scale_feedback), 
-                step=1.0, disabled=True, 
-                help="Showing the calculated scale ratio performed by the Auto-Fit layout machine framework."
+        with col_imp1:
+            st.markdown("**Output Media Sheet Footprint (mm):**")
+            media_w_mm = st.number_input("Custom Sheet Width (mm):", min_value=50.0, max_value=2000.0, value=210.0, step=1.0)
+            media_h_mm = st.number_input("Custom Sheet Height (mm):", min_value=50.0, max_value=2000.0, value=297.0, step=1.0)
+            
+            st.write("---")
+            st.markdown("**Grid Layout (Columns x Rows):**")
+            grid_col1, grid_col2 = st.columns(2)
+            with grid_col1:
+                cols_input = st.number_input("Columns:", min_value=1, max_value=100, value=2, step=1, key="cols_input_widget")
+            with grid_col2:
+                rows_input = st.number_input("Rows:", min_value=1, max_value=100, value=4, step=1, key="rows_input_widget")
+            
+            total_ups_preview = int(cols_input) * int(rows_input)
+            st.caption(f"➡️ This will place **{total_ups_preview}-up** per sheet ({int(cols_input)} cols x {int(rows_input)} rows).")
+            
+            print_style = st.radio("Output Surface Type:", ["Simplex", "Duplex"], horizontal=True)
+            layout_choice = st.radio("Step Sequencing Route Pattern:", ["Repeat / Step & Repeat", "Cut and Stack"], horizontal=False)
+
+        with col_imp2:
+            trim_w = st.number_input("Finished Trim Width (mm):", min_value=5.0, max_value=500.0, value=90.0, step=0.5)
+            trim_h = st.number_input("Finished Trim Height (mm):", min_value=5.0, max_value=500.0, value=55.0, step=0.5)
+            bleed_w = st.number_input("Bleed Envelope Margin (mm):", min_value=0.0, max_value=25.0, value=2.0, step=0.5)
+            gut_x = st.number_input("Horizontal Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+            gut_y = st.number_input("Vertical Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+            
+            st.write("---")
+            fit_to_size_option = st.checkbox("Auto-Fit Content to Selected Trim Box?", value=True, help="When checked, automatically scales your design up or down to lock onto the trim size boundaries perfectly.")
+            
+            if fit_to_size_option:
+                magnification_pct = st.number_input(
+                    f"Artwork Magnification Scale (%):", 
+                    min_value=10.0, max_value=200.0, 
+                    value=float(st.session_state.system_auto_scale_feedback), 
+                    step=1.0, disabled=True, 
+                    help="Showing the calculated scale ratio performed by the Auto-Fit layout machine framework."
+                )
+            else:
+                magnification_pct = st.number_input(
+                    "Artwork Magnification Scale (%):", 
+                    min_value=10.0, max_value=200.0, 
+                    value=98.0, step=1.0, 
+                    help="Type any precise manual percentage scale constraint layout size rule."
+                )
+                
+            trim_style_selection = st.selectbox(
+                "Select Trim Marks Option style:",
+                ["Outer Perimeter Only", "All Individual Items", "None"],
+                index=0,
+                help="Outer Perimeter Only ensures that no marks cut into the middle of the sheet or cross over adjacent artwork cells."
             )
-        else:
-            magnification_pct = st.number_input(
-                "Artwork Magnification Scale (%):", 
-                min_value=10.0, max_value=200.0, 
-                value=98.0, step=1.0, 
-                help="Type any precise manual percentage scale constraint layout size rule."
+
+        st.write("---")
+        st.markdown("**Sheet Margins (mm):**")
+        margin_col1, margin_col2, margin_col3, margin_col4 = st.columns(4)
+        with margin_col1:
+            margin_top_mm = st.number_input("Top:", min_value=0.0, max_value=200.0, value=25.0, step=1.0, key="margin_top_input")
+        with margin_col2:
+            margin_bottom_mm = st.number_input("Bottom:", min_value=0.0, max_value=200.0, value=25.0, step=1.0, key="margin_bottom_input")
+        with margin_col3:
+            margin_left_mm = st.number_input("Left:", min_value=0.0, max_value=200.0, value=25.0, step=1.0, key="margin_left_input")
+        with margin_col4:
+            margin_right_mm = st.number_input("Right:", min_value=0.0, max_value=200.0, value=25.0, step=1.0, key="margin_right_input")
+
+        st.write("---")
+        st.markdown("**Page Identifier (Counter):**")
+        page_id_enabled = st.checkbox("Enable Page Identifier?", value=False, key="page_id_enabled_input")
+        
+        if page_id_enabled:
+            page_id_text = st.text_input(
+                "Custom Label Text:", value="File One", key="page_id_text_input",
+                help='This text is followed automatically by "Page X of N" — e.g. "File One Page 1 of 8".'
             )
             
-        trim_style_selection = st.selectbox(
-            "Select Trim Marks Option style:",
-            ["Outer Perimeter Only", "All Individual Items", "None"],
-            index=0,
-            help="Outer Perimeter Only ensures that no marks cut into the middle of the sheet or cross over adjacent artwork cells."
-        )
+            id_col1, id_col2, id_col3 = st.columns(3)
+            with id_col1:
+                page_id_font_size = st.number_input("Font Size (pt):", min_value=4.0, max_value=72.0, value=8.0, step=0.5, key="page_id_font_size_input")
+            with id_col2:
+                page_id_margin = st.number_input("Margin from Edge (mm):", min_value=0.0, max_value=100.0, value=5.0, step=0.5, key="page_id_margin_input")
+            with id_col3:
+                page_id_position = st.selectbox("Position on Sheet:", ["Top", "Bottom", "Left", "Right"], index=1, key="page_id_position_input")
+            
+            page_id_sides = st.radio(
+                "Apply Identifier To:", ["Both Sides", "Front Only"], horizontal=True, key="page_id_sides_input",
+                help="For Duplex jobs: print the identifier on both the front and back of each sheet, or the front only."
+            )
+        else:
+            page_id_text = ""
+            page_id_font_size = 8.0
+            page_id_margin = 5.0
+            page_id_position = "Bottom"
+            page_id_sides = "Both Sides"
 
-    st.write("---")
-    st.markdown("**Sheet Margins (mm):**")
-    margin_col1, margin_col2, margin_col3, margin_col4 = st.columns(4)
-    with margin_col1:
-        margin_top_mm = st.number_input("Top:", min_value=0.0, max_value=200.0, value=25.0, step=1.0, key="margin_top_input")
-    with margin_col2:
-        margin_bottom_mm = st.number_input("Bottom:", min_value=0.0, max_value=200.0, value=25.0, step=1.0, key="margin_bottom_input")
-    with margin_col3:
-        margin_left_mm = st.number_input("Left:", min_value=0.0, max_value=200.0, value=25.0, step=1.0, key="margin_left_input")
-    with margin_col4:
-        margin_right_mm = st.number_input("Right:", min_value=0.0, max_value=200.0, value=25.0, step=1.0, key="margin_right_input")
+    with main_preview_col:
+        st.markdown("**Live Layout Preview:**")
+        preview_fig = render_layout_preview(
+            media_w_mm, media_h_mm, trim_w, trim_h,
+            bleed_w, gut_x, gut_y,
+            margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm,
+            int(cols_input), int(rows_input),
+            page_id_enabled, page_id_position, page_id_text
+        )
+        st.pyplot(preview_fig, use_container_width=True)
+        st.caption("Blue = trim boxes, dotted red = bleed, dashed gray = margin boundary. Updates live as you adjust settings.")
 
     st.divider()
 
-        # Form Submission Trigger Action Button Hook
+    # Form Submission Trigger Action Button Hook
     if st.button("Run Sheet Imposition Processing", type="primary", use_container_width=True):
         if not uploaded_impose_pdf:
             st.error("⚠️ Active source PDF file stream data must be staged before layout processing.")
         else:
             with st.spinner("Calculating layout transformations and packing pages..."):
                 try:
-                    # NOTE: execute_pdf_imposition() converts mm -> points internally.
-                    # Do NOT pre-convert here — pass raw millimeter values only,
-                    # otherwise dimensions get converted twice (mm -> pt -> "pt-as-mm").
-                    
-                    # Generate dynamic configuration mapping dictionary parameters using custom dimensions
                     imposition_runtime_config = {
                         'media_w': media_w_mm,
                         'media_h': media_h_mm,
@@ -916,28 +954,28 @@ if st.session_state.current_page == "impose":
                         'repeat_per_page': int(cols_input) * int(rows_input),
                         'trim_marks_style': trim_style_selection,
                         'fit_to_size': fit_to_size_option,
-                        'magnification_pct': float(magnification_pct) 
+                        'magnification_pct': float(magnification_pct),
+                        'page_id_enabled': page_id_enabled,
+                        'page_id_text': page_id_text,
+                        'page_id_font_size': float(page_id_font_size),
+                        'page_id_margin': float(page_id_margin),
+                        'page_id_position': page_id_position,
+                        'page_id_sides': page_id_sides,
                     }
                     
-                    # Extract binary payload array values out of file uploader session memory
                     raw_input_bytes = uploaded_impose_pdf.read()
                     
-                    # Unpack output values, capturing the calculated scale percentage
                     compiled_output_pdf, total_calculated_ups, computed_percentage = execute_pdf_imposition(raw_input_bytes, imposition_runtime_config)
                     
-                    # Store computed values securely in session state background memory
                     st.session_state.system_auto_scale_feedback = computed_percentage
                     
                     st.success(f"🎉 Imposition Matrix Calculated Successfully! ({total_calculated_ups}-up per sheet)")
                     
-                    # Display real-time conversion summary messages
                     if fit_to_size_option:
                         st.info(f"📊 **Auto-Fit Metric:** Source artwork was automatically scaled to **{computed_percentage}%** of its original size to fit the requested trim window bounds.")
                     
-                    # FIXED: Added explicit [0] split indexing to prevent type string interpolation errors
                     base_name = os.path.splitext(uploaded_impose_pdf.name)[0]
                     
-                    # Display production file download stream pipeline action widget
                     st.download_button(
                         label=f"⬇️ Download Imposed Output File",
                         data=compiled_output_pdf,
