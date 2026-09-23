@@ -473,7 +473,7 @@ def execute_pdf_imposition(input_bytes, config):
     reader = PdfReader(io.BytesIO(input_bytes))
     layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
 
-    # --- NEW: "Mix" config -------------------------------------------------
+    # --- "Mix" config -------------------------------------------------
     # Mix mode groups the sheet's up-positions into clusters of `mix_copies`
     # positions (column-major: all rows of col 0, then col 1, ...). Each
     # cluster is a self-contained "cut & stack" run over its own dedicated
@@ -547,7 +547,7 @@ def execute_pdf_imposition(input_bytes, config):
     # Mirrored offset for duplex back pages, measured from the right edge
     center_offset_x_right = margin_right + (avail_w - grid_w) / 2.0
 
-    # --- NEW: Mix-mode grouping ---------------------------------------
+    # --- Mix-mode grouping ---------------------------------------------
     mix_num_groups = None
     if is_mix_mode:
         if mix_copies < 1 or mix_copies > ups_per_page:
@@ -761,7 +761,7 @@ def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
     compute_grid_positions helper as execute_pdf_imposition, so what you see
     here always matches the real output geometry.
 
-    NEW: when layout_mode contains "Mix" and mix_copies is given, cells
+    When layout_mode contains "Mix" and mix_copies is given, cells
     belonging to the same column-major cluster (i.e. the same "copies"
     group) are tinted with the same color band, so you can visually confirm
     the grouping before running the job.
@@ -812,9 +812,9 @@ def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
 
     # Grid cells (trim boxes + bleed boxes)
     for idx, pos in enumerate(geo['positions']):
-        # geo['positions'] is assumed row-major (r*cols+c), matching the
-        # main fill loop's r,c iteration order -- recover r,c to compute the
-        # Mix-mode column-major group color.
+        # geo['positions'] is row-major (r*cols+c), matching the main fill
+        # loop's r,c iteration order -- recover r,c to compute the Mix-mode
+        # column-major group color.
         r, c = divmod(idx, cols)
         x, y = pos['x'], pos['y']
 
@@ -939,7 +939,41 @@ if st.session_state.current_page == "impose":
             st.caption(f"➡️ This will place **{total_ups_preview}-up** per sheet ({int(cols_input)} cols x {int(rows_input)} rows).")
 
             print_style = st.radio("Output Surface Type:", ["Simplex", "Duplex"], horizontal=True)
-            layout_choice = st.radio("Step Sequencing Route Pattern:", ["Repeat / Step & Repeat", "Cut and Stack"], horizontal=False)
+            layout_choice = st.radio(
+                "Step Sequencing Route Pattern:",
+                ["Repeat / Step & Repeat", "Cut and Stack", "Mix (Sections + Copies)"],
+                horizontal=False,
+                help=(
+                    "Repeat: every position on the sheet shows the same page, N-up. "
+                    "Cut and Stack: every position is a unique page-slot (best for 1 copy of a huge document). "
+                    "Mix: splits the document into sections across the sheet, and repeats "
+                    "each section's current page down a set number of positions -- use this "
+                    "when you need a modest number of copies (e.g. 20) of a very long document "
+                    "without either full N-way collation or 20 separate cut-and-stack runs."
+                ),
+            )
+
+            mix_copies_value = 1
+            if layout_choice == "Mix (Sections + Copies)":
+                mix_copies_value = st.number_input(
+                    "Copies per page (how many identical copies do you want?):",
+                    min_value=1,
+                    max_value=max(1, total_ups_preview),
+                    value=min(20, max(1, total_ups_preview)),
+                    step=1,
+                    key="mix_copies_input",
+                    help=(
+                        f"With {total_ups_preview}-up on the sheet, this many positions will be "
+                        "dedicated to identical copies of the same page. The remaining positions "
+                        "split into sections, each working through its own dedicated slice of the "
+                        "document in parallel -- see the summary below."
+                    ),
+                )
+                mix_num_groups_preview = max(1, total_ups_preview // int(mix_copies_value))
+                st.caption(
+                    f"➡️ This splits the document into **{mix_num_groups_preview} section(s)**, "
+                    f"each repeated **{int(mix_copies_value)}× per sheet** to produce your copies."
+                )
 
         with col_imp2:
             trim_w = st.number_input("Finished Trim Width (mm):", min_value=5.0, max_value=500.0, value=90.0, step=0.5)
@@ -1022,10 +1056,15 @@ if st.session_state.current_page == "impose":
             bleed_w, gut_x, gut_y,
             margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm,
             int(cols_input), int(rows_input),
-            page_id_enabled, page_id_position, page_id_text
+            page_id_enabled, page_id_position, page_id_text,
+            layout_mode=layout_choice,
+            mix_copies=int(mix_copies_value) if layout_choice == "Mix (Sections + Copies)" else None,
         )
         st.markdown(preview_svg, unsafe_allow_html=True)
-        st.caption("Blue = trim boxes, dotted red = bleed, dashed gray = margin boundary. Updates live as you adjust settings.")
+        if layout_choice == "Mix (Sections + Copies)":
+            st.caption("Each color band = one section of the document, repeated across its positions for your copies. Dotted red = bleed, dashed gray = margin boundary.")
+        else:
+            st.caption("Blue = trim boxes, dotted red = bleed, dashed gray = margin boundary. Updates live as you adjust settings.")
 
     st.divider()
 
@@ -1053,6 +1092,7 @@ if st.session_state.current_page == "impose":
                             'right': margin_right_mm,
                         },
                         'layout_mode': layout_choice,
+                        'mix_copies': int(mix_copies_value),
                         'duplex': (print_style == "Duplex"),
                         'repeat_per_page': int(cols_input) * int(rows_input),
                         'trim_marks_style': trim_style_selection,
