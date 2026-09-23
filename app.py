@@ -473,8 +473,23 @@ def execute_pdf_imposition(input_bytes, config):
     reader = PdfReader(io.BytesIO(input_bytes))
     layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
 
+    # --- NEW: "Mix" config -------------------------------------------------
+    # Mix mode groups the sheet's up-positions into clusters of `mix_copies`
+    # positions (column-major: all rows of col 0, then col 1, ...). Each
+    # cluster is a self-contained "cut & stack" run over its own dedicated
+    # slice of the source document, and within a cluster every position
+    # shows the SAME page on a given sheet (i.e. it IS the requested number
+    # of copies of that page). This is why:
+    #   mix_copies == 1               -> identical to "Cut and Stack"
+    #   mix_copies == cols*rows (ups) -> identical to one-page-per-sheet repeat
+    is_mix_mode = "Mix" in layout_mode
+    mix_copies = int(config.get('mix_copies', 1)) if is_mix_mode else None
+    # -------------------------------------------------------------------
+
     # Build Page Pool
-    if "Cut and Stack" in layout_mode:
+    # Mix mode uses the full unique page list too -- replication for copies
+    # happens via placement (below), not by duplicating pool entries.
+    if "Cut and Stack" in layout_mode or is_mix_mode:
         page_pool = list(reader.pages)
     else:
         page_pool = []
@@ -532,7 +547,26 @@ def execute_pdf_imposition(input_bytes, config):
     # Mirrored offset for duplex back pages, measured from the right edge
     center_offset_x_right = margin_right + (avail_w - grid_w) / 2.0
 
-    stack_depth = math.ceil(total_input_pages / ups_per_page)
+    # --- NEW: Mix-mode grouping ---------------------------------------
+    mix_num_groups = None
+    if is_mix_mode:
+        if mix_copies < 1 or mix_copies > ups_per_page:
+            raise ValueError(
+                f"'Copies per page' ({mix_copies}) must be between 1 and the total "
+                f"up-count on the sheet ({ups_per_page})."
+            )
+        # ceil so a remainder just gives one smaller final group, never an error
+        mix_num_groups = math.ceil(ups_per_page / mix_copies)
+    # -------------------------------------------------------------------
+
+    if is_mix_mode:
+        # One page advances per group per sheet -- same shape of formula as
+        # Cut and Stack's stack_depth, just keyed on groups instead of
+        # individual positions.
+        stack_depth = math.ceil(total_input_pages / mix_num_groups)
+    else:
+        stack_depth = math.ceil(total_input_pages / ups_per_page)
+
     is_duplex = config.get('duplex', False)
     if is_duplex and (stack_depth % 2 != 0):
         stack_depth += 1
@@ -583,6 +617,25 @@ def execute_pdf_imposition(input_bytes, config):
                     else:
                         grid_position_idx = (r * cols) + c
                         input_page_idx = (grid_position_idx * total_stack_layers) + current_stack_layer
+
+                elif is_mix_mode:
+                    # Column-major logical index so a whole "column of copies"
+                    # stays together as one cluster. Mirror it on the back
+                    # side (same trick Cut and Stack uses) so front/back line
+                    # up physically after a duplex flip.
+                    c_logical = (cols - 1 - c) if is_back_page else c
+                    colmajor_idx = (c_logical * rows) + r
+                    group_id = colmajor_idx // mix_copies
+
+                    if is_duplex:
+                        input_page_idx = (
+                            (group_id * (total_stack_layers * 2))
+                            + (current_stack_layer * 2)
+                            + (1 if is_back_page else 0)
+                        )
+                    else:
+                        input_page_idx = (group_id * total_stack_layers) + current_stack_layer
+
                 else:
                     input_page_idx = (sheet_idx * ups_per_page) + (r * cols + c)
 
@@ -700,14 +753,22 @@ def execute_pdf_imposition(input_bytes, config):
 def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
                            bleed_mm, gutter_x_mm, gutter_y_mm,
                            margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm,
-                           cols, rows, page_id_enabled, page_id_position, page_id_text):
+                           cols, rows, page_id_enabled, page_id_position, page_id_text,
+                           layout_mode=None, mix_copies=None):
     """
     Builds a live SVG diagram of the current sheet/grid settings, entirely in
     millimeters — no external plotting library needed. Uses the SAME
     compute_grid_positions helper as execute_pdf_imposition, so what you see
     here always matches the real output geometry.
+
+    NEW: when layout_mode contains "Mix" and mix_copies is given, cells
+    belonging to the same column-major cluster (i.e. the same "copies"
+    group) are tinted with the same color band, so you can visually confirm
+    the grouping before running the job.
     Returns an SVG string (render with st.markdown(svg, unsafe_allow_html=True)).
     """
+    import math
+
     geo = compute_grid_positions(
         media_w_mm, media_h_mm, trim_w_mm, trim_h_mm, gutter_x_mm, gutter_y_mm,
         margin_left_mm, margin_right_mm, margin_top_mm, margin_bottom_mm,
@@ -716,6 +777,9 @@ def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
 
     fits = geo['grid_w'] <= geo['avail_w'] + 0.01 and geo['grid_h'] <= geo['avail_h'] + 0.01
     grid_color = "#4a90d9" if fits else "#d94a4a"
+
+    is_mix_mode = bool(layout_mode) and ("Mix" in layout_mode) and mix_copies
+    mix_palette = ["#4a90d9", "#e0a13a", "#5cb85c", "#b565d9", "#d95c8f", "#5cc9d9"]
 
     # Fit the sheet into a fixed-size canvas, preserving aspect ratio
     canvas_w, canvas_h = 480, 480
@@ -747,12 +811,23 @@ def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
     )
 
     # Grid cells (trim boxes + bleed boxes)
-    for pos in geo['positions']:
+    for idx, pos in enumerate(geo['positions']):
+        # geo['positions'] is assumed row-major (r*cols+c), matching the
+        # main fill loop's r,c iteration order -- recover r,c to compute the
+        # Mix-mode column-major group color.
+        r, c = divmod(idx, cols)
         x, y = pos['x'], pos['y']
+
+        cell_color = grid_color
+        if is_mix_mode and fits:
+            colmajor_idx = (c * rows) + r
+            group_id = colmajor_idx // int(mix_copies)
+            cell_color = mix_palette[group_id % len(mix_palette)]
+
         tx, ty = to_svg_xy(x, y + trim_h_mm)  # top-left corner in mm -> svg
         svg_parts.append(
             f'<rect x="{tx}" y="{ty}" width="{trim_w_mm*scale}" height="{trim_h_mm*scale}" '
-            f'fill="{grid_color}" fill-opacity="0.35" stroke="{grid_color}" stroke-width="1.0" />'
+            f'fill="{cell_color}" fill-opacity="0.35" stroke="{cell_color}" stroke-width="1.0" />'
         )
         if bleed_mm > 0:
             bx, by = to_svg_xy(x - bleed_mm, y + trim_h_mm + bleed_mm)
@@ -786,6 +861,9 @@ def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
 
     # Title / fit warning
     title = f'{cols} x {rows} = {cols*rows}-up on {media_w_mm:.0f}x{media_h_mm:.0f}mm'
+    if is_mix_mode:
+        num_groups = math.ceil((cols * rows) / int(mix_copies))
+        title += f'  |  Mix: {mix_copies}-up copies x {num_groups} sections'
     if not fits:
         title += "  \u26A0 DOES NOT FIT"
     svg_parts.append(f'<text x="{canvas_w/2}" y="14" font-size="12" fill="#333" text-anchor="middle">{title}</text>')
