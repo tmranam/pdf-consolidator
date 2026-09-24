@@ -1,4 +1,5 @@
 import io
+import math
 import os
 import zipfile
 import pandas as pd
@@ -474,16 +475,19 @@ def execute_pdf_imposition(input_bytes, config):
     layout_mode = config.get('layout_mode', "Repeat / Step & Repeat")
 
     # --- "Mix" config -------------------------------------------------
-    # Mix mode groups the sheet's up-positions into clusters of `mix_copies`
-    # positions (column-major: all rows of col 0, then col 1, ...). Each
-    # cluster is a self-contained "cut & stack" run over its own dedicated
-    # slice of the source document, and within a cluster every position
-    # shows the SAME page on a given sheet (i.e. it IS the requested number
-    # of copies of that page). This is why:
-    #   mix_copies == 1               -> identical to "Cut and Stack"
-    #   mix_copies == cols*rows (ups) -> identical to one-page-per-sheet repeat
+    # Mix mode splits the document into `mix_sections` parallel streams and
+    # assigns them to columns by (column index) % mix_sections -- i.e. the
+    # pattern of sections REPEATS every `mix_sections` columns across the
+    # sheet's width (interleaved striping), not clustered into one block of
+    # adjacent columns. Every row within a given column shows the identical
+    # page (rows are pure copies, they never affect which section a
+    # position belongs to). This is why:
+    #   mix_sections == 1     -> identical to "Repeat / Step & Repeat"
+    #   mix_sections == cols  -> every column is its own section (rows-only
+    #                            copies per column -- the classic case where
+    #                            mix_sections == number of distinct blocks)
     is_mix_mode = "Mix" in layout_mode
-    mix_copies = int(config.get('mix_copies', 1)) if is_mix_mode else None
+    mix_sections = int(config.get('mix_sections', 1)) if is_mix_mode else None
     # -------------------------------------------------------------------
 
     # Build Page Pool
@@ -550,18 +554,18 @@ def execute_pdf_imposition(input_bytes, config):
     # --- Mix-mode grouping ---------------------------------------------
     mix_num_groups = None
     if is_mix_mode:
-        if mix_copies < 1 or mix_copies > ups_per_page:
+        if mix_sections < 1 or mix_sections > cols:
             raise ValueError(
-                f"'Copies per page' ({mix_copies}) must be between 1 and the total "
-                f"up-count on the sheet ({ups_per_page})."
+                f"'Number of sections' ({mix_sections}) must be between 1 and the "
+                f"number of columns ({cols}) -- each section needs at least one "
+                f"dedicated column to repeat through."
             )
-        # ceil so a remainder just gives one smaller final group, never an error
-        mix_num_groups = math.ceil(ups_per_page / mix_copies)
+        mix_num_groups = mix_sections
     # -------------------------------------------------------------------
 
     if is_mix_mode:
-        # One page advances per group per sheet -- same shape of formula as
-        # Cut and Stack's stack_depth, just keyed on groups instead of
+        # One page advances per section per sheet -- same shape of formula as
+        # Cut and Stack's stack_depth, just keyed on sections instead of
         # individual positions.
         stack_depth = math.ceil(total_input_pages / mix_num_groups)
     else:
@@ -619,13 +623,14 @@ def execute_pdf_imposition(input_bytes, config):
                         input_page_idx = (grid_position_idx * total_stack_layers) + current_stack_layer
 
                 elif is_mix_mode:
-                    # Column-major logical index so a whole "column of copies"
-                    # stays together as one cluster. Mirror it on the back
-                    # side (same trick Cut and Stack uses) so front/back line
-                    # up physically after a duplex flip.
+                    # Interleaved column striping: the section pattern repeats
+                    # every `mix_sections` columns across the sheet's width, and
+                    # every row within a column shows the identical page (rows
+                    # are pure copies -- they never affect the section). Mirror
+                    # the column on the back side (same trick Cut and Stack
+                    # uses) so front/back line up physically after a duplex flip.
                     c_logical = (cols - 1 - c) if is_back_page else c
-                    colmajor_idx = (c_logical * rows) + r
-                    group_id = colmajor_idx // mix_copies
+                    group_id = c_logical % mix_sections
 
                     if is_duplex:
                         input_page_idx = (
@@ -754,17 +759,18 @@ def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
                            bleed_mm, gutter_x_mm, gutter_y_mm,
                            margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm,
                            cols, rows, page_id_enabled, page_id_position, page_id_text,
-                           layout_mode=None, mix_copies=None):
+                           layout_mode=None, mix_sections=None):
     """
     Builds a live SVG diagram of the current sheet/grid settings, entirely in
     millimeters — no external plotting library needed. Uses the SAME
     compute_grid_positions helper as execute_pdf_imposition, so what you see
     here always matches the real output geometry.
 
-    When layout_mode contains "Mix" and mix_copies is given, cells
-    belonging to the same column-major cluster (i.e. the same "copies"
-    group) are tinted with the same color band, so you can visually confirm
-    the grouping before running the job.
+    When layout_mode contains "Mix" and mix_sections is given, columns are
+    tinted by (column index) % mix_sections -- the same interleaved striping
+    execute_pdf_imposition uses -- so you can visually confirm the section
+    pattern (and that every row in a striped column matches) before running
+    the job.
     Returns an SVG string (render with st.markdown(svg, unsafe_allow_html=True)).
     """
     import math
@@ -778,7 +784,7 @@ def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
     fits = geo['grid_w'] <= geo['avail_w'] + 0.01 and geo['grid_h'] <= geo['avail_h'] + 0.01
     grid_color = "#4a90d9" if fits else "#d94a4a"
 
-    is_mix_mode = bool(layout_mode) and ("Mix" in layout_mode) and mix_copies
+    is_mix_mode = bool(layout_mode) and ("Mix" in layout_mode) and mix_sections
     mix_palette = ["#4a90d9", "#e0a13a", "#5cb85c", "#b565d9", "#d95c8f", "#5cc9d9"]
 
     # Fit the sheet into a fixed-size canvas, preserving aspect ratio
@@ -820,8 +826,7 @@ def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
 
         cell_color = grid_color
         if is_mix_mode and fits:
-            colmajor_idx = (c * rows) + r
-            group_id = colmajor_idx // int(mix_copies)
+            group_id = c % int(mix_sections)
             cell_color = mix_palette[group_id % len(mix_palette)]
 
         tx, ty = to_svg_xy(x, y + trim_h_mm)  # top-left corner in mm -> svg
@@ -862,8 +867,15 @@ def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
     # Title / fit warning
     title = f'{cols} x {rows} = {cols*rows}-up on {media_w_mm:.0f}x{media_h_mm:.0f}mm'
     if is_mix_mode:
-        num_groups = math.ceil((cols * rows) / int(mix_copies))
-        title += f'  |  Mix: {mix_copies}-up copies x {num_groups} sections'
+        s = int(mix_sections)
+        base_cols = cols // s
+        extra = cols % s
+        min_copies = rows * base_cols
+        max_copies = rows * (base_cols + (1 if extra else 0))
+        if extra == 0:
+            title += f'  |  Mix: {s} sections x {min_copies} copies'
+        else:
+            title += f'  |  Mix: {s} sections, {min_copies}-{max_copies} copies (uneven)'
     if not fits:
         title += "  \u26A0 DOES NOT FIT"
     svg_parts.append(f'<text x="{canvas_w/2}" y="14" font-size="12" fill="#333" text-anchor="middle">{title}</text>')
@@ -944,19 +956,20 @@ if st.session_state.current_page == "impose":
                 ["Repeat / Step & Repeat", "Cut and Stack", "Mix (Sections + Copies)"],
                 horizontal=False,
                 help=(
-                    "Repeat: every position on the sheet shows the same page, N-up. "
-                    "Cut and Stack: every position is a unique page-slot (best for 1 copy of a huge document). "
-                    "Mix: splits the document into sections across the sheet, and repeats "
-                    "each section's current page down a set number of positions -- use this "
-                    "when you need a modest number of copies (e.g. 20) of a very long document "
-                    "without either full N-way collation or 20 separate cut-and-stack runs."
+                    "Repeat: every position on the sheet shows the same page, N-up -- best for 1 page, many copies. "
+                    "Cut and Stack: every position is a unique page-slot, 1 copy per full run -- best for 1 copy of a huge document. "
+                    "Mix: enter how many copies you want. The document is split into "
+                    "(up-count ÷ copies) sections striped across the columns, so one print run "
+                    "produces all your copies together in far fewer sheets than running Cut and "
+                    "Stack once per copy, and with one simple final collation instead of "
+                    "hand-picking pages across hundreds of sheets."
                 ),
             )
 
-            mix_copies_value = 1
+            mix_sections_value = 1
             if layout_choice == "Mix (Sections + Copies)":
                 mix_copies_value = st.number_input(
-                    "Copies per page (how many identical copies do you want?):",
+                    "How many copies do you want?:",
                     min_value=1,
                     max_value=max(1, total_ups_preview),
                     value=min(20, max(1, total_ups_preview)),
@@ -964,16 +977,53 @@ if st.session_state.current_page == "impose":
                     key="mix_copies_input",
                     help=(
                         f"With {total_ups_preview}-up on the sheet, this many positions will be "
-                        "dedicated to identical copies of the same page. The remaining positions "
-                        "split into sections, each working through its own dedicated slice of the "
-                        "document in parallel -- see the summary below."
+                        "dedicated to identical copies of each page. The document then splits into "
+                        "(up-count ÷ copies) sections, each running down its own dedicated column(s) -- "
+                        "see the summary below for exactly what that works out to."
                     ),
                 )
-                mix_num_groups_preview = max(1, total_ups_preview // int(mix_copies_value))
-                st.caption(
-                    f"➡️ This splits the document into **{mix_num_groups_preview} section(s)**, "
-                    f"each repeated **{int(mix_copies_value)}× per sheet** to produce your copies."
-                )
+                c_total = int(cols_input)
+                r_total = int(rows_input)
+                requested_copies = int(mix_copies_value)
+
+                # Derive the section count from the requested copies: sections = ups / copies.
+                mix_sections_value = max(1, total_ups_preview // requested_copies)
+                # A section needs at least one dedicated column to stripe through.
+                mix_sections_value = min(mix_sections_value, c_total)
+
+                base_cols = c_total // mix_sections_value
+                extra = c_total % mix_sections_value
+                achieved_min = r_total * base_cols
+                achieved_max = r_total * (base_cols + (1 if extra else 0))
+
+                sheets_hint = ""
+                if uploaded_impose_pdf is not None:
+                    try:
+                        uploaded_impose_pdf.seek(0)
+                        _tmp_total_pages = len(PdfReader(uploaded_impose_pdf).pages)
+                        uploaded_impose_pdf.seek(0)
+                        sheets_needed = math.ceil(_tmp_total_pages / mix_sections_value)
+                        sheets_hint = f" For your uploaded {_tmp_total_pages}-page file, that's **{sheets_needed} sheets**."
+                    except Exception:
+                        sheets_hint = ""
+
+                if extra == 0 and achieved_min == requested_copies:
+                    st.caption(
+                        f"➡️ Splits the document into **{mix_sections_value} section(s)**, "
+                        f"producing exactly **{requested_copies} copies** per sheet.{sheets_hint}"
+                    )
+                elif extra == 0:
+                    st.caption(
+                        f"➡️ Closest clean fit: **{mix_sections_value} section(s)**, "
+                        f"producing **{achieved_min} copies** per sheet (you asked for {requested_copies}; "
+                        f"{total_ups_preview}-up doesn't divide evenly by {requested_copies}).{sheets_hint}"
+                    )
+                else:
+                    st.caption(
+                        f"➡️ Splits the document into **{mix_sections_value} section(s)**, producing "
+                        f"**{achieved_min}-{achieved_max} copies** per sheet (uneven -- {c_total} columns "
+                        f"doesn't divide evenly by {mix_sections_value} sections).{sheets_hint}"
+                    )
 
         with col_imp2:
             trim_w = st.number_input("Finished Trim Width (mm):", min_value=5.0, max_value=500.0, value=90.0, step=0.5)
@@ -1058,7 +1108,7 @@ if st.session_state.current_page == "impose":
             int(cols_input), int(rows_input),
             page_id_enabled, page_id_position, page_id_text,
             layout_mode=layout_choice,
-            mix_copies=int(mix_copies_value) if layout_choice == "Mix (Sections + Copies)" else None,
+            mix_sections=int(mix_sections_value) if layout_choice == "Mix (Sections + Copies)" else None,
         )
         st.markdown(preview_svg, unsafe_allow_html=True)
         if layout_choice == "Mix (Sections + Copies)":
@@ -1092,7 +1142,7 @@ if st.session_state.current_page == "impose":
                             'right': margin_right_mm,
                         },
                         'layout_mode': layout_choice,
-                        'mix_copies': int(mix_copies_value),
+                        'mix_sections': int(mix_sections_value),
                         'duplex': (print_style == "Duplex"),
                         'repeat_per_page': int(cols_input) * int(rows_input),
                         'trim_marks_style': trim_style_selection,
