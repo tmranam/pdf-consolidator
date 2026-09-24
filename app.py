@@ -29,24 +29,24 @@ st.markdown(
     <style>
     /* Field labels, e.g. "Columns:", "Rows:", "Job No:" */
     [data-testid="stWidgetLabel"] p {
-        font-size: 1.1rem !important;
+        font-size: 1.25rem !important;
     }
     /* Text typed into number inputs / text inputs */
     input, textarea {
-        font-size: 1.1rem !important;
+        font-size: 1.25rem !important;
     }
     /* Selectbox: selected value + dropdown option text */
     [data-testid="stSelectbox"] div[data-baseweb="select"] * {
-        font-size: 1.1rem !important;
+        font-size: 1.25rem !important;
     }
     /* Radio button and checkbox option text */
     [data-testid="stRadio"] label p,
     [data-testid="stCheckbox"] label p {
-        font-size: 1.1rem !important;
+        font-size: 1.25rem !important;
     }
     /* The small gray helper text under a field (st.caption) */
     [data-testid="stCaptionContainer"] p {
-        font-size: 1.0rem !important;
+        font-size: 1.25rem !important;
     }
     /* Section headings (st.markdown("#### ...")) */
     h4 {
