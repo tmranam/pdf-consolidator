@@ -800,7 +800,11 @@ def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm,
         return svg_x, svg_y
 
     svg_parts = []
-    svg_parts.append(f'<svg width="{canvas_w}" height="{canvas_h}" xmlns="http://www.w3.org/2000/svg" style="background:#fafafa;border:1px solid #ddd;">')
+    svg_parts.append(
+        f'<svg viewBox="0 0 {canvas_w} {canvas_h}" width="100%" height="auto" '
+        f'preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" '
+        f'style="background:#fafafa;border:1px solid #ddd; display:block; max-width:100%;">'
+    )
 
     # Sheet outline
     sx, sy = to_svg_xy(0, media_h_mm)
@@ -1110,7 +1114,10 @@ if st.session_state.current_page == "impose":
             layout_mode=layout_choice,
             mix_sections=int(mix_sections_value) if layout_choice == "Mix (Sections + Copies)" else None,
         )
-        st.markdown(preview_svg, unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="width:100%; max-width:100%; overflow:hidden;">{preview_svg}</div>',
+            unsafe_allow_html=True,
+        )
         if layout_choice == "Mix (Sections + Copies)":
             st.caption("Each color band = one section of the document, repeated across its positions for your copies. Dotted red = bleed, dashed gray = margin boundary.")
         else:
