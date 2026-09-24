@@ -29,28 +29,36 @@ st.markdown(
     <style>
     /* Field labels, e.g. "Columns:", "Rows:", "Job No:" */
     [data-testid="stWidgetLabel"] p {
-        font-size: 1.25rem !important;
+        font-size: 1.1rem !important;
     }
     /* Text typed into number inputs / text inputs */
     input, textarea {
-        font-size: 1.25rem !important;
+        font-size: 1.1rem !important;
     }
     /* Selectbox: selected value + dropdown option text */
     [data-testid="stSelectbox"] div[data-baseweb="select"] * {
-        font-size: 1.25rem !important;
+        font-size: 1.1rem !important;
     }
     /* Radio button and checkbox option text */
     [data-testid="stRadio"] label p,
     [data-testid="stCheckbox"] label p {
-        font-size: 1.25rem !important;
+        font-size: 1.1rem !important;
     }
     /* The small gray helper text under a field (st.caption) */
     [data-testid="stCaptionContainer"] p {
-        font-size: 1.25rem !important;
+        font-size: 1.0rem !important;
     }
     /* Section headings (st.markdown("#### ...")) */
     h4 {
         font-size: 1.3rem !important;
+    }
+    /* Buttons: nav bar (Impose/Duplicate/Consolidator/...), the process/run
+       buttons (e.g. "Run Sheet Imposition Processing"), and download buttons */
+    .stButton button, [data-testid="stButton"] button,
+    .stDownloadButton button, [data-testid="stDownloadButton"] button {
+        font-size: 1.2rem !important;
+        padding: 0.7rem 1.2rem !important;
+        height: auto !important;
     }
     </style>
     """,
@@ -400,7 +408,7 @@ def create_labels_pdf(
                 if current_label_data["show_num"]:
                     active_lines.append({
                         "text": f"{current_label_data['current_idx']} of {current_label_data['total_idx']}",
-                        "font_size": 15,
+                        "font_size": 10,
                         "bold": True
                     })
                 
