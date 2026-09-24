@@ -14,7 +14,7 @@ import streamlit as st
 
 # Set page layout once at the top
 st.set_page_config(
-    page_title="PDF Toolsuite Dashboard", page_icon="🛠️", layout="centered"
+    page_title="PDF Toolsuite Dashboard", page_icon="🛠️", layout="wide"
 )
 
 # Initialize navigation state
