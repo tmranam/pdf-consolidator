@@ -17,6 +17,46 @@ st.set_page_config(
     page_title="PDF Toolsuite Dashboard", page_icon="🛠️", layout="wide"
 )
 
+# ---------------------------------------------------------
+# GLOBAL FONT SIZE OVERRIDE
+# Streamlit doesn't expose a font-size option anywhere in its widget API --
+# this CSS injection is the only way to change it. Every value below is in
+# rem (1rem = the browser's base 16px), so 1.1rem is ~10% bigger than
+# default, 1.25rem is 25% bigger, etc. Bump these up or down and rerun.
+# ---------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    /* Field labels, e.g. "Columns:", "Rows:", "Job No:" */
+    [data-testid="stWidgetLabel"] p {
+        font-size: 1.1rem !important;
+    }
+    /* Text typed into number inputs / text inputs */
+    input, textarea {
+        font-size: 1.1rem !important;
+    }
+    /* Selectbox: selected value + dropdown option text */
+    [data-testid="stSelectbox"] div[data-baseweb="select"] * {
+        font-size: 1.1rem !important;
+    }
+    /* Radio button and checkbox option text */
+    [data-testid="stRadio"] label p,
+    [data-testid="stCheckbox"] label p {
+        font-size: 1.1rem !important;
+    }
+    /* The small gray helper text under a field (st.caption) */
+    [data-testid="stCaptionContainer"] p {
+        font-size: 1.0rem !important;
+    }
+    /* Section headings (st.markdown("#### ...")) */
+    h4 {
+        font-size: 1.3rem !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Initialize navigation state
 if "current_page" not in st.session_state:
     st.session_state.current_page = "batch_consolidator"
