@@ -400,7 +400,7 @@ def create_labels_pdf(
                 if current_label_data["show_num"]:
                     active_lines.append({
                         "text": f"{current_label_data['current_idx']} of {current_label_data['total_idx']}",
-                        "font_size": 10,
+                        "font_size": 15,
                         "bold": True
                     })
                 
