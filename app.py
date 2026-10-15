@@ -694,10 +694,12 @@ def execute_pdf_imposition(input_bytes, config):
                 )
                 input_page.merge_page(original_page)
 
-                orig_ll_x = float(input_page.mediabox.lower_left)
-                orig_ll_y = float(input_page.mediabox.lower_left)
+                # Fetch original content dimensions safely extracting tuple indexes
+                orig_ll_x = float(input_page.mediabox.lower_left[0])
+                orig_ll_y = float(input_page.mediabox.lower_left[1])
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
+
 
                 # --- STEP 1: DEFINE BLEED ENVELOPE BOUNDS ---
                 crop_w_pt = trim_w + (2 * bleed)
