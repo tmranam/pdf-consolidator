@@ -703,7 +703,7 @@ def execute_pdf_imposition(input_bytes, config):
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
 
-                # --- CENTERED POSITIONING ---
+                                # --- CENTERED POSITIONING ---
                 if is_back_page:
                     c_eff = cols - 1 - c
                     x_pos = media_w - center_offset_x_right - (c_eff * step_x) - trim_w
@@ -726,8 +726,39 @@ def execute_pdf_imposition(input_bytes, config):
                 tx = x_pos - bleed + (target_w - (orig_w * scale)) / 2 - (ll_x * scale)
                 ty = y_pos - bleed + (target_h - (orig_h * scale)) / 2 - (ll_y * scale)
 
+                # ================================================================
+                # NEW ENFORCED CROPPING MASK (CLIPPING PATH MATRIX)
+                # ================================================================
+                # Calculate strict outer structural dimensions including gutters
+                # Left/Right restriction: trim_w + (gutter_x / 2)
+                # Top/Bottom restriction: trim_h + (gutter_y / 2)
+                clip_w_pt = trim_w + (gutter_x / 2.0)
+                clip_h_pt = trim_h + (gutter_y / 2.0)
+                
+                # Offset positions to perfectly center your restriction crop window 
+                clip_x_pt = x_pos - (gutter_x / 4.0)
+                clip_y_pt = y_pos - (gutter_y / 4.0)
+
+                clip_packet = io.BytesIO()
+                clip_can = canvas.Canvas(clip_packet, pagesize=(media_w, media_h))
+                
+                # Save canvas context state, define clipping region rectangle path, clip it
+                clip_can.saveState()
+                clip_path = clip_can.beginPath()
+                clip_path.rect(clip_x_pt, clip_y_pt, clip_w_pt, clip_h_pt)
+                clip_can.clipPath(clip_path, stroke=0, fill=0)
+                clip_can.restoreState()
+                clip_can.save()
+                
+                clip_packet.seek(0)
+                clip_reader = PdfReader(clip_packet)
+                if len(clip_reader.pages) > 0:
+                    sheet.merge_page(clip_reader.pages[0], over=False, expand=False)
+                # ================================================================
+
                 op_transform = Transformation().scale(scale, scale).translate(tx, ty)
                 sheet.merge_transformed_page(input_page, op_transform, expand=False)
+
 
                 # Trim marks logic
                 if mark_style != "None":
