@@ -633,7 +633,7 @@ def execute_pdf_imposition(input_bytes, config):
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     last_computed_scale = 1.0
 
-    for sheet_idx in range(total_sheets):
+        for sheet_idx in range(total_sheets):
         sheet = PageObject.create_blank_page(width=media_w, height=media_h)
         is_back_page = is_duplex and (sheet_idx % 2 == 1)
 
@@ -648,8 +648,6 @@ def execute_pdf_imposition(input_bytes, config):
 
         mark_packet = io.BytesIO()
         mark_can = canvas.Canvas(mark_packet, pagesize=(media_w, media_h))
-        # Draw in pure CMYK black (K-plate only) — never RGB — to keep the file
-        # consistently CMYK end-to-end.
         mark_can.setStrokeColorCMYK(0, 0, 0, 1)
         mark_can.setFillColorCMYK(0, 0, 0, 1)
         mark_can.setLineWidth(0.5)
@@ -671,12 +669,6 @@ def execute_pdf_imposition(input_bytes, config):
                         input_page_idx = (grid_position_idx * total_stack_layers) + current_stack_layer
 
                 elif is_mix_mode:
-                    # Interleaved column striping: the section pattern repeats
-                    # every `mix_sections` columns across the sheet's width, and
-                    # every row within a column shows the identical page (rows
-                    # are pure copies -- they never affect the section). Mirror
-                    # the column on the back side (same trick Cut and Stack
-                    # uses) so front/back line up physically after a duplex flip.
                     c_logical = (cols - 1 - c) if is_back_page else c
                     group_id = c_logical % mix_sections
 
@@ -695,15 +687,37 @@ def execute_pdf_imposition(input_bytes, config):
                 if input_page_idx >= total_input_pages:
                     continue
 
-                input_page = page_pool[input_page_idx]
+                # Create a clean, decoupled clone of the page object to prevent global state leaks
+                original_page = page_pool[input_page_idx]
+                input_page = PageObject.create_blank_page(
+                    width=original_page.mediabox.width, 
+                    height=original_page.mediabox.height
+                )
+                input_page.merge_page(original_page)
 
-                # --- FIX 1: NORMALIZE SOURCE PAGE ORIGIN TO (0,0) ---
-                ll_x = float(input_page.mediabox.lower_left[0])
-                ll_y = float(input_page.mediabox.lower_left[1])
+                # Fetch original content dimensions
+                orig_ll_x = float(input_page.mediabox.lower_left[0])
+                orig_ll_y = float(input_page.mediabox.lower_left[1])
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
 
-                                # --- CENTERED POSITIONING ---
+                # --- STEP 1: CALCULATE THE STRICT CROP DIMENSIONS ---
+                # e.g., Finished Width (210mm) + Half of Gutter Gap (10mm / 2 = 5mm) = 215mm limit
+                crop_w_pt = trim_w + (gutter_x / 2.0)
+                crop_h_pt = trim_h + (gutter_y / 2.0)
+
+                # Center the crop box relative to the original source artwork dimensions
+                crop_ll_x = orig_ll_x + ((orig_w - crop_w_pt) / 2.0)
+                crop_ll_y = orig_ll_y + ((orig_h - crop_h_pt) / 2.0)
+                crop_ur_x = crop_ll_x + crop_w_pt
+                crop_ur_y = crop_ll_y + crop_h_pt
+
+                # Apply hard physical bounding boxes directly to the page metrics architecture
+                crop_rect = RectangleObject([crop_ll_x, crop_ll_y, crop_ur_x, crop_ur_y])
+                input_page.mediabox = crop_rect
+                input_page.cropbox = crop_rect
+
+                # --- STEP 2: CALCULATE PLACEMENT ON PRESS SHEET ---
                 if is_back_page:
                     c_eff = cols - 1 - c
                     x_pos = media_w - center_offset_x_right - (c_eff * step_x) - trim_w
@@ -712,55 +726,23 @@ def execute_pdf_imposition(input_bytes, config):
 
                 y_pos = media_h - center_offset_y - (r * step_y) - trim_h
 
-                target_w = trim_w + (2 * bleed)
-                target_h = trim_h + (2 * bleed)
-
+                # Base scaling calculations on the newly cropped size, not the raw original file sizes
                 if fit_to_size:
-                    scale = min(target_w / orig_w, target_h / orig_h)
+                    scale = min(trim_w / crop_w_pt, trim_h / crop_h_pt)
                 else:
                     scale = 1.0 * mag_factor
 
                 last_computed_scale = scale
 
-                # --- FIX 2: ACCOUNT FOR ORIGINAL LOWER-LEFT SHIFTS ---
-                tx = x_pos - bleed + (target_w - (orig_w * scale)) / 2 - (ll_x * scale)
-                ty = y_pos - bleed + (target_h - (orig_h * scale)) / 2 - (ll_y * scale)
-
-                # ================================================================
-                # NEW ENFORCED CROPPING MASK (CLIPPING PATH MATRIX)
-                # ================================================================
-                # Calculate strict outer structural dimensions including gutters
-                # Left/Right restriction: trim_w + (gutter_x / 2)
-                # Top/Bottom restriction: trim_h + (gutter_y / 2)
-                clip_w_pt = trim_w + (gutter_x / 2.0)
-                clip_h_pt = trim_h + (gutter_y / 2.0)
-                
-                # Offset positions to perfectly center your restriction crop window 
-                clip_x_pt = x_pos - (gutter_x / 4.0)
-                clip_y_pt = y_pos - (gutter_y / 4.0)
-
-                clip_packet = io.BytesIO()
-                clip_can = canvas.Canvas(clip_packet, pagesize=(media_w, media_h))
-                
-                # Save canvas context state, define clipping region rectangle path, clip it
-                clip_can.saveState()
-                clip_path = clip_can.beginPath()
-                clip_path.rect(clip_x_pt, clip_y_pt, clip_w_pt, clip_h_pt)
-                clip_can.clipPath(clip_path, stroke=0, fill=0)
-                clip_can.restoreState()
-                clip_can.save()
-                
-                clip_packet.seek(0)
-                clip_reader = PdfReader(clip_packet)
-                if len(clip_reader.pages) > 0:
-                    sheet.merge_page(clip_reader.pages[0], over=False, expand=False)
-                # ================================================================
+                # --- STEP 3: TRANSFORM AND SHIFT TO CELL POSITION ---
+                # Offset positions shift slightly outward to keep the trimmed gutter segments centered
+                tx = x_pos - (gutter_x / 4.0 * scale) - (crop_ll_x * scale)
+                ty = y_pos - (gutter_y / 4.0 * scale) - (crop_ll_y * scale)
 
                 op_transform = Transformation().scale(scale, scale).translate(tx, ty)
                 sheet.merge_transformed_page(input_page, op_transform, expand=False)
 
-
-                # Trim marks logic
+                # --- STEP 4: RENDER PLACEMENT MARKS ---
                 if mark_style != "None":
                     mark_len = 12.0
                     offset = bleed + 3.0
@@ -785,6 +767,7 @@ def execute_pdf_imposition(input_bytes, config):
                     if draw_all or (is_right_edge and is_bottom_edge):
                         mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
                         mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
+
 
         # --- PAGE IDENTIFIER: draw "{text} Page X of N" at the chosen edge ---
         should_draw_id = page_id_enabled and page_id_text.strip() != ""
