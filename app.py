@@ -633,18 +633,45 @@ def execute_pdf_imposition(input_bytes, config):
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     last_computed_scale = 1.0
 
+    # -------------------------------------------------------------------------
+    # BOOKLET PRE-PROCESSING COMPONENT
+    # -------------------------------------------------------------------------
+    is_booklet = (layout_mode == "Booklet")
+    booklet_sub_mode = config.get('booklet_sub_layout', "Cut and Stack")
+    b_copies = int(config.get('booklet_copies', 1))
+    creep_per_sheet_pt = float(config.get('booklet_creep', 0.0)) * (72.0 / 25.4)
+
+    if is_booklet:
+        # Force a multiple of 4 pages by appending blank slots if necessary
+        booklet_pool = list(reader.pages)
+        while len(booklet_pool) % 4 != 0:
+            blank = PageObject.create_blank_page(width=media_w, height=media_h)
+            booklet_pool.append(blank)
+        
+        total_input_pages = len(booklet_pool)
+        booklet_sheets_needed = total_input_pages // 4  # Total distinct paper leaves needed per copy
+        
+        # Override structural sheet tracking metrics 
+        if booklet_sub_mode == "Cut and Stack":
+            total_sheets = booklet_sheets_needed * 2  # Front + Back sequences multiplier
+        else:
+            # Repeat layout matches a single booklet's sheet footprint depth
+            total_sheets = booklet_sheets_needed * 2
+            
+        total_physical_sheets = total_sheets // 2
+
+    # -------------------------------------------------------------------------
+    # MAIN SHEET PROCESSING LAYOUT MATRIX LOOP
+    # -------------------------------------------------------------------------
+    writer = PdfWriter()
+
     for sheet_idx in range(total_sheets):
         sheet = PageObject.create_blank_page(width=media_w, height=media_h)
-        is_back_page = is_duplex and (sheet_idx % 2 == 1)
+        is_back_page = (sheet_idx % 2 == 1)  # Booklet mode enforces Duplex formatting
 
-        if is_duplex:
-            current_stack_layer = sheet_idx // 2
-            total_stack_layers = total_sheets // 2
-        else:
-            current_stack_layer = sheet_idx
-            total_stack_layers = total_sheets
-
-        physical_sheet_number = (sheet_idx // 2) + 1 if is_duplex else sheet_idx + 1
+        # Sheet tracking calculations
+        current_stack_layer = sheet_idx // 2
+        physical_sheet_number = current_stack_layer + 1
 
         mark_packet = io.BytesIO()
         mark_can = canvas.Canvas(mark_packet, pagesize=(media_w, media_h))
@@ -655,41 +682,77 @@ def execute_pdf_imposition(input_bytes, config):
 
         for r in range(rows):
             for c in range(cols):
-                if "Cut and Stack" in layout_mode:
-                    if is_duplex:
-                        if is_back_page:
-                            c_front = cols - 1 - c
-                            grid_position_idx = (r * cols) + c_front
-                            input_page_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2) + 1
+                
+                # --- LAYOUT LOGIC ARBITRATION MATRIX ---
+                if is_booklet:
+                    # Determine booklet slot pair grouping columns (left page vs right page)
+                    # Every individual booklet needs a 2-column slot lane (Left/Right pairing)
+                    booklet_instance_idx = c // 2
+                    
+                    if booklet_instance_idx >= b_copies:
+                        continue  # Protect bounds limit grid allocations
+                        
+                    is_slot_right_side = (c % 2 == 1)
+
+                    # Compute distinct leaf tracking structures 
+                    if booklet_sub_mode == "Cut and Stack":
+                        # Stacks run downwards through structural sheets
+                        target_booklet_sheet = current_stack_layer
+                    else:
+                        # Step & Repeat uses the same sheet identity layer layout across columns
+                        target_booklet_sheet = current_stack_layer
+
+                    # Saddle-Stitch Pagination Formula Core
+                    # Map signatures relative to the booklet page limits bounds
+                    low_page = (target_booklet_sheet * 2) + 1
+                    high_page = total_input_pages - (target_booklet_sheet * 2)
+
+                    if not is_back_page:
+                        # Front Signatures: [High Page (Even)] on Left, [Low Page (Odd)] on Right
+                        if not is_slot_right_side:
+                            input_page_idx = high_page - 1  # 0-indexed adjustment
                         else:
-                            grid_position_idx = (r * cols) + c
-                            input_page_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2)
+                            input_page_idx = low_page - 1
                     else:
-                        grid_position_idx = (r * cols) + c
-                        input_page_idx = (grid_position_idx * total_stack_layers) + current_stack_layer
+                        # Back Signatures (Flipped for backing alignment): [Low Page] on Left, [High Page] on Right
+                        if not is_slot_right_side:
+                            input_page_idx = (low_page + 1) - 1
+                        else:
+                            input_page_idx = (high_page - 1) - 1
 
-                elif is_mix_mode:
-                    c_logical = (cols - 1 - c) if is_back_page else c
-                    group_id = c_logical % mix_sections
-
-                    if is_duplex:
-                        input_page_idx = (
-                            (group_id * (total_stack_layers * 2))
-                            + (current_stack_layer * 2)
-                            + (1 if is_back_page else 0)
-                        )
-                    else:
-                        input_page_idx = (group_id * total_stack_layers) + current_stack_layer
+                    if input_page_idx >= len(booklet_pool):
+                        continue
+                    original_page = booklet_pool[input_page_idx]
 
                 else:
-                    input_page_idx = (sheet_idx * ups_per_page) + (r * cols + c)
+                    # Standard Non-Booklet Sequencing Fallback
+                    if "Cut and Stack" in layout_mode:
+                        if is_duplex:
+                            if is_back_page:
+                                c_front = cols - 1 - c
+                                grid_position_idx = (r * cols) + c_front
+                                input_page_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2) + 1
+                            else:
+                                grid_position_idx = (r * cols) + c
+                                input_page_idx = (grid_position_idx * (total_stack_layers * 2)) + (current_stack_layer * 2)
+                        else:
+                            grid_position_idx = (r * cols) + c
+                            input_page_idx = (grid_position_idx * total_stack_layers) + current_stack_layer
+                    elif is_mix_mode:
+                        c_logical = (cols - 1 - c) if is_back_page else c
+                        group_id = c_logical % mix_sections
+                        if is_duplex:
+                            input_page_idx = ((group_id * (total_stack_layers * 2)) + (current_stack_layer * 2) + (1 if is_back_page else 0))
+                        else:
+                            input_page_idx = (group_id * total_stack_layers) + current_stack_layer
+                    else:
+                        input_page_idx = (sheet_idx * ups_per_page) + (r * cols + c)
 
-                if input_page_idx >= total_input_pages:
-                    continue
+                    if input_page_idx >= total_input_pages:
+                        continue
+                    original_page = page_pool[input_page_idx]
 
-                original_page = page_pool[input_page_idx]
-                
-                # Fully isolate the object via stream cloning
+                # Isolate target page via byte stream parsing block 
                 isolate_writer = PdfWriter()
                 isolate_writer.add_page(original_page)
                 isolate_buf = io.BytesIO()
@@ -703,18 +766,12 @@ def execute_pdf_imposition(input_bytes, config):
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
 
-                # --- STEP 1: CALCULATE THE DYNAMIC CROP BOUNDARY ---
-                # Determine how much maximum safe bleed space is allowed based on the gutter gap
-                # If gutter is 5mm, allow up to 2.5mm of bleed horizontally so they meet but never overlap.
-                # If there is no gutter, it trims right at the finished edge line.
                 max_safe_bleed_x = min(bleed, gutter_x / 2.0) if gutter_x > 0 else 0.0
                 max_safe_bleed_y = min(bleed, gutter_y / 2.0) if gutter_y > 0 else 0.0
 
-                # Define the independent crop dimensions
                 crop_w_pt = trim_w + (2 * max_safe_bleed_x)
                 crop_h_pt = trim_h + (2 * max_safe_bleed_y)
 
-                # Center the calculated crop window over the original artwork
                 crop_ll_x = orig_ll_x + ((orig_w - crop_w_pt) / 2.0)
                 crop_ll_y = orig_ll_y + ((orig_h - crop_h_pt) / 2.0)
                 crop_ur_x = crop_ll_x + crop_w_pt
@@ -724,7 +781,6 @@ def execute_pdf_imposition(input_bytes, config):
                 input_page.mediabox = crop_rect
                 input_page.cropbox = crop_rect
 
-                # --- STEP 2: SHEET PLACEMENT COORDINATES ---
                 if is_back_page:
                     c_eff = cols - 1 - c
                     x_pos = media_w - center_offset_x_right - (c_eff * step_x) - trim_w
@@ -737,23 +793,31 @@ def execute_pdf_imposition(input_bytes, config):
                     scale = min(trim_w / trim_w, trim_h / trim_h)
                 else:
                     scale = 1.0 * mag_factor
-
                 last_computed_scale = scale
 
-                # Translate the position cleanly based on the restricted bleed boundaries
                 tx = x_pos - (max_safe_bleed_x * scale) - (crop_ll_x * scale)
                 ty = y_pos - (max_safe_bleed_y * scale) - (crop_ll_y * scale)
+
+                # --- STEP 2.5: CALCULATE SPINE CREEP INCREMENT SHIFTS ---
+                if is_booklet and creep_per_sheet_pt > 0:
+                    # Creep shifts pages progressively inward based on sheet depth layer
+                    # Layer 0 (outer sheet) has 0 creep. Layer 1 moves inward by 1 * creep value, etc.
+                    current_creep_offset = target_booklet_sheet * creep_per_sheet_pt * scale
+                    
+                    if is_slot_right_side:
+                        # Shift right-hand pages leftwards toward the spine
+                        tx -= current_creep_offset
+                    else:
+                        # Shift left-hand pages rightwards toward the spine
+                        tx += current_creep_offset
 
                 op_transform = Transformation().scale(scale, scale).translate(tx, ty)
                 sheet.merge_transformed_page(input_page, op_transform, expand=False)
 
-                # --- STEP 3: INTERSECTING TRIM MARKS (STAYS FIXED AT FINISHED SIZE) ---
-                                # --- STEP 3: INTERSECTING TRIM MARKS (CONTEXT-AWARE GUTTER ENGINE) ---
+                # --- STEP 4: INTERSECTING TRIM MARKS ENGINE (CONTEXT-AWARE) ---
                 if mark_style != "None":
-                    # Base parameters
-                    base_mark_len = 12.0
-                    offset = 2.0  # Clear space outside the finished trim line
-                    
+                    mark_len = 12.0
+                    offset = 2.0
                     x1, x2 = x_pos, x_pos + trim_w
                     y1, y2 = y_pos, y_pos + trim_h
 
@@ -762,11 +826,10 @@ def execute_pdf_imposition(input_bytes, config):
                     is_top_edge = (r == 0)
                     is_bottom_edge = (r == rows - 1)
 
-                    # Dynamically calculate safe, non-overlapping line lengths based on available space
-                    # Inner lines stop exactly in the middle of the channel to protect adjacent artwork
-                    safe_len_left   = base_mark_len if is_left_edge else max(1.0, (gutter_x / 2.0) - offset)
-                    safe_len_right  = base_mark_len if is_right_edge else max(1.0, (gutter_x / 2.0) - offset)
-                    safe_len_top    = base_mark_len if is_top_edge else max(1.0, (gutter_y / 2.0) - offset)
+                    safe_len_left   = mark_len if is_left_edge else max(1.0, (gutter_x / 2.0) - offset)
+                    safe_len_right  = mark_len if is_right_edge else max(1.0, (gutter_x / 2.0) - offset)
+                    safe_len_top    = mark_len if is_top_edge else max(1.0, (gutter_y / 2.0) - offset)
+
                     safe_len_bottom = base_mark_len if is_bottom_edge else max(1.0, (gutter_y / 2.0) - offset)
 
                     # --- TOP-LEFT CORNER MARKS ---
