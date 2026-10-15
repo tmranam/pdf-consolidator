@@ -833,13 +833,13 @@ def execute_pdf_imposition(input_bytes, config):
                     if mark_style == "All Individual Items" or (is_left_edge or is_top_edge):
                         mark_can.line(x1, y2 + offset, x1, y2 + offset + safe_len_top)
                         mark_can.line(x1 - offset, y2, x1 - offset - safe_len_left, y2)
-                        if mark_style == "All Individual Items" or (is_right_edge or is_top_edge):
+                    if mark_style == "All Individual Items" or (is_right_edge or is_top_edge):
                         mark_can.line(x2, y2 + offset, x2, y2 + offset + safe_len_top)
                         mark_can.line(x2 + offset, y2, x2 + offset + safe_len_right, y2)
-                        if mark_style == "All Individual Items" or (is_left_edge or is_bottom_edge):
+                    if mark_style == "All Individual Items" or (is_left_edge or is_bottom_edge):
                         mark_can.line(x1, y1 - offset, x1, y1 - offset - safe_len_bottom)
                         mark_can.line(x1 - offset, y1, x1 - offset - safe_len_left, y1)
-                        if mark_style == "All Individual Items" or (is_right_edge or is_bottom_edge):
+                    if mark_style == "All Individual Items" or (is_right_edge or is_bottom_edge):
                         mark_can.line(x2, y1 - offset, x2, y1 - offset - safe_len_bottom)
                         mark_can.line(x2 + offset, y1, x2 + offset + safe_len_right, y1)
         # --- PAGE IDENTIFIER: draw "{text} Page X of N" at the chosen edge ---
