@@ -748,9 +748,11 @@ def execute_pdf_imposition(input_bytes, config):
                 sheet.merge_transformed_page(input_page, op_transform, expand=False)
 
                 # --- STEP 3: INTERSECTING TRIM MARKS (STAYS FIXED AT FINISHED SIZE) ---
+                                # --- STEP 3: INTERSECTING TRIM MARKS (CONTEXT-AWARE GUTTER ENGINE) ---
                 if mark_style != "None":
-                    mark_len = 12.0
-                    offset = 3.0  # Clear space outside the active bleed envelope
+                    # Base parameters
+                    base_mark_len = 12.0
+                    offset = 2.0  # Clear space outside the finished trim line
                     
                     x1, x2 = x_pos, x_pos + trim_w
                     y1, y2 = y_pos, y_pos + trim_h
@@ -760,21 +762,41 @@ def execute_pdf_imposition(input_bytes, config):
                     is_top_edge = (r == 0)
                     is_bottom_edge = (r == rows - 1)
 
+                    # Dynamically calculate safe, non-overlapping line lengths based on available space
+                    # Inner lines stop exactly in the middle of the channel to protect adjacent artwork
+                    safe_len_left   = base_mark_len if is_left_edge else max(1.0, (gutter_x / 2.0) - offset)
+                    safe_len_right  = base_mark_len if is_right_edge else max(1.0, (gutter_x / 2.0) - offset)
+                    safe_len_top    = base_mark_len if is_top_edge else max(1.0, (gutter_y / 2.0) - offset)
+                    safe_len_bottom = base_mark_len if is_bottom_edge else max(1.0, (gutter_y / 2.0) - offset)
+
+                    # --- TOP-LEFT CORNER MARKS ---
                     if mark_style == "All Individual Items" or (is_left_edge or is_top_edge):
-                        mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)  
-                        mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)  
+                        # Vertical line (points upwards)
+                        mark_can.line(x1, y2 + offset, x1, y2 + offset + safe_len_top)  
+                        # Horizontal line (points leftwards)
+                        mark_can.line(x1 - offset, y2, x1 - offset - safe_len_left, y2)  
 
+                    # --- TOP-RIGHT CORNER MARKS ---
                     if mark_style == "All Individual Items" or (is_right_edge or is_top_edge):
-                        mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)  
-                        mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)  
+                        # Vertical line (points upwards)
+                        mark_can.line(x2, y2 + offset, x2, y2 + offset + safe_len_top)  
+                        # Horizontal line (points rightwards)
+                        mark_can.line(x2 + offset, y2, x2 + offset + safe_len_right, y2)  
 
+                    # --- BOTTOM-LEFT CORNER MARKS ---
                     if mark_style == "All Individual Items" or (is_left_edge or is_bottom_edge):
-                        mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)  
-                        mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)  
+                        # Vertical line (points downwards)
+                        mark_can.line(x1, y1 - offset, x1, y1 - offset - safe_len_bottom)  
+                        # Horizontal line (points leftwards)
+                        mark_can.line(x1 - offset, y1, x1 - offset - safe_len_left, y1)  
 
+                    # --- BOTTOM-RIGHT CORNER MARKS ---
                     if mark_style == "All Individual Items" or (is_right_edge or is_bottom_edge):
-                        mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)  
-                        mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)  
+                        # Vertical line (points downwards)
+                        mark_can.line(x2, y1 - offset, x2, y1 - offset - safe_len_bottom)  
+                        # Horizontal line (points rightwards)
+                        mark_can.line(x2 + offset, y1, x2 + offset + safe_len_right, y1)  
+
   
 
         # --- PAGE IDENTIFIER: draw "{text} Page X of N" at the chosen edge ---
