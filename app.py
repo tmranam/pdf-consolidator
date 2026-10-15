@@ -687,21 +687,29 @@ def execute_pdf_imposition(input_bytes, config):
                 if input_page_idx >= total_input_pages:
                     continue
 
+                # ----------------------------------------------------------------
+                # HARD ENGINE DECOUPLING: ISOLATE OBJECT MEMORY STACK VIA BYTES
+                # ----------------------------------------------------------------
                 original_page = page_pool[input_page_idx]
-                input_page = PageObject.create_blank_page(
-                    width=original_page.mediabox.width, 
-                    height=original_page.mediabox.height
-                )
-                input_page.merge_page(original_page)
+                
+                # Export this specific single page out to bytes to isolate it completely
+                isolate_writer = PdfWriter()
+                isolate_writer.add_page(original_page)
+                isolate_buf = io.BytesIO()
+                isolate_writer.write(isolate_buf)
+                isolate_buf.seek(0)
+                
+                # Load it back as an completely new independent document context
+                isolate_reader = PdfReader(isolate_buf)
+                input_page = isolate_reader.pages[0]
 
-                # Fetch original content dimensions safely extracting tuple indexes
+                # Extract safely using the explicit tuple item index mapping 
                 orig_ll_x = float(input_page.mediabox.lower_left[0])
                 orig_ll_y = float(input_page.mediabox.lower_left[1])
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
 
-
-                # --- STEP 1: DEFINE BLEED ENVELOPE BOUNDS ---
+                # --- STEP 1: DEFINE BLEED ENVELOPE CROP BOX BOUNDS ---
                 crop_w_pt = trim_w + (2 * bleed)
                 crop_h_pt = trim_h + (2 * bleed)
 
@@ -710,6 +718,7 @@ def execute_pdf_imposition(input_bytes, config):
                 crop_ur_x = crop_ll_x + crop_w_pt
                 crop_ur_y = crop_ll_y + crop_h_pt
 
+                # Apply hard physical bounding boxes directly to the fresh page instance
                 crop_rect = RectangleObject([crop_ll_x, crop_ll_y, crop_ur_x, crop_ur_y])
                 input_page.mediabox = crop_rect
                 input_page.cropbox = crop_rect
@@ -730,6 +739,7 @@ def execute_pdf_imposition(input_bytes, config):
 
                 last_computed_scale = scale
 
+                # Translate position keeping the artwork's center relative to your bleed lines
                 tx = x_pos - (bleed * scale) - (crop_ll_x * scale)
                 ty = y_pos - (bleed * scale) - (crop_ll_y * scale)
 
@@ -739,36 +749,36 @@ def execute_pdf_imposition(input_bytes, config):
                 # --- STEP 3: INTERSECTING CROP MARKS ENGINE (CROSS-HAIRS) ---
                 if mark_style != "None":
                     mark_len = 12.0
-                    offset = 3.0  # Clear space out from the trim edge line
+                    offset = 3.0  
                     
                     x1, x2 = x_pos, x_pos + trim_w
                     y1, y2 = y_pos, y_pos + trim_h
 
-                    # Determine grid boundaries relative to current position
                     is_left_edge = (c == 0) if not is_back_page else (c == cols - 1)
                     is_right_edge = (c == cols - 1) if not is_back_page else (c == 0)
                     is_top_edge = (r == 0)
                     is_bottom_edge = (r == rows - 1)
 
-                    # Top-Left Corner Marks Allocation
+                    # Top-Left Corner 
                     if mark_style == "All Individual Items" or (is_left_edge or is_top_edge):
-                        mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)  # Vertical
-                        mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)  # Horizontal
+                        mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)  
+                        mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)  
 
-                    # Top-Right Corner Marks Allocation
+                    # Top-Right Corner
                     if mark_style == "All Individual Items" or (is_right_edge or is_top_edge):
-                        mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)  # Vertical
-                        mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)  # Horizontal
+                        mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)  
+                        mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)  
 
-                    # Bottom-Left Corner Marks Allocation
+                    # Bottom-Left Corner
                     if mark_style == "All Individual Items" or (is_left_edge or is_bottom_edge):
-                        mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)  # Vertical
-                        mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)  # Horizontal
+                        mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)  
+                        mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)  
 
-                    # Bottom-Right Corner Marks Allocation
+                    # Bottom-Right Corner
                     if mark_style == "All Individual Items" or (is_right_edge or is_bottom_edge):
-                        mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)  # Vertical
-                        mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)  # Horizontal
+                        mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)  
+                        mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)  
+
 
         # --- PAGE IDENTIFIER: draw "{text} Page X of N" at the chosen edge ---
         should_draw_id = page_id_enabled and page_id_text.strip() != ""
