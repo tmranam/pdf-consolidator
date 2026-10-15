@@ -633,7 +633,7 @@ def execute_pdf_imposition(input_bytes, config):
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     last_computed_scale = 1.0
 
-           for sheet_idx in range(total_sheets):
+    for sheet_idx in range(total_sheets):
         sheet = PageObject.create_blank_page(width=media_w, height=media_h)
         is_back_page = is_duplex and (sheet_idx % 2 == 1)
 
