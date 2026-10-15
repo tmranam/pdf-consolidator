@@ -1023,7 +1023,7 @@ if st.session_state.current_page == "impose":
 
     st.divider()
 
-    # --- Main layout: live preview (left) + all settings (right) ---
+       # --- Main layout: live preview (left) + all settings (right) ---
     main_preview_col, main_settings_col = st.columns([1, 2])
 
     with main_settings_col:
@@ -1046,23 +1046,35 @@ if st.session_state.current_page == "impose":
             total_ups_preview = int(cols_input) * int(rows_input)
             st.caption(f"➡️ This will place **{total_ups_preview}-up** per sheet ({int(cols_input)} cols x {int(rows_input)} rows).")
 
-            print_style = st.radio("Output Surface Type:", ["Simplex", "Duplex"], horizontal=True)
+            # Initialize Booklet default settings block parameters
+            mix_sections_value = 1
+            booklet_sub_layout = "Cut and Stack"
+            booklet_copies = 1
+            booklet_creep_mm = 0.0
+
+            # Dynamic check to override layout constraints
             layout_choice = st.radio(
                 "Step Sequencing Route Pattern:",
-                ["Repeat / Step & Repeat", "Cut and Stack", "Mix (Sections + Copies)"],
+                ["Repeat / Step & Repeat", "Cut and Stack", "Mix (Sections + Copies)", "Booklet"],
                 horizontal=False,
                 help=(
                     "Repeat: every position on the sheet shows the same page, N-up -- best for 1 page, many copies. "
                     "Cut and Stack: every position is a unique page-slot, 1 copy per full run -- best for 1 copy of a huge document. "
                     "Mix: enter how many copies you want. The document is split into "
-                    "(up-count ÷ copies) sections striped across the columns, so one print run "
-                    "produces all your copies together in far fewer sheets than running Cut and "
-                    "Stack once per copy, and with one simple final collation instead of "
-                    "hand-picking pages across hundreds of sheets."
+                    "(up-count ÷ copies) sections striped across the columns... "
+                    "Booklet: Rearranges pages into a double-sided folding booklet with spine creep offsets."
                 ),
             )
 
-            mix_sections_value = 1
+            print_style = st.radio(
+                "Output Surface Type:", 
+                ["Simplex", "Duplex"], 
+                index=1 if layout_choice == "Booklet" else 0,
+                disabled=(layout_choice == "Booklet"),
+                horizontal=True,
+                help="Booklets require two-sided duplex layout printing signatures."
+            )
+
             if layout_choice == "Mix (Sections + Copies)":
                 mix_copies_value = st.number_input(
                     "How many copies do you want?:",
@@ -1073,9 +1085,7 @@ if st.session_state.current_page == "impose":
                     key="mix_copies_input",
                     help=(
                         f"With {total_ups_preview}-up on the sheet, this many positions will be "
-                        "dedicated to identical copies of each page. The document then splits into "
-                        "(up-count ÷ copies) sections, each running down its own dedicated column(s) -- "
-                        "see the summary below for exactly what that works out to."
+                        "dedicated to identical copies of each page."
                     ),
                 )
                 c_total = int(cols_input)
@@ -1104,22 +1114,48 @@ if st.session_state.current_page == "impose":
                         sheets_hint = ""
 
                 if extra == 0 and achieved_min == requested_copies:
-                    st.caption(
-                        f"➡️ Splits the document into **{mix_sections_value} section(s)**, "
-                        f"producing exactly **{requested_copies} copies** per sheet.{sheets_hint}"
-                    )
+                    st.caption(f"➡️ Splits the document into **{mix_sections_value} section(s)**, producing exactly **{requested_copies} copies** per sheet.{sheets_hint}")
                 elif extra == 0:
-                    st.caption(
-                        f"➡️ Closest clean fit: **{mix_sections_value} section(s)**, "
-                        f"producing **{achieved_min} copies** per sheet (you asked for {requested_copies}; "
-                        f"{total_ups_preview}-up doesn't divide evenly by {requested_copies}).{sheets_hint}"
-                    )
+                    st.caption(f"➡️ Closest clean fit: **{mix_sections_value} section(s)**, producing **{achieved_min} copies** per sheet.{sheets_hint}")
                 else:
-                    st.caption(
-                        f"➡️ Splits the document into **{mix_sections_value} section(s)**, producing "
-                        f"**{achieved_min}-{achieved_max} copies** per sheet (uneven -- {c_total} columns "
-                        f"doesn't divide evenly by {mix_sections_value} sections).{sheets_hint}"
+                    st.caption(f"➡️ Splits the document into **{mix_sections_value} section(s)**, producing **{achieved_min}-{achieved_max} copies** per sheet.{sheets_hint}")
+
+            elif layout_choice == "Booklet":
+                st.markdown("#### 📖 Booklet Structural Sub-Configurations")
+                
+                b_lay_col1, b_lay_col2 = st.columns(2)
+                with b_lay_col1:
+                    booklet_sub_layout = st.radio(
+                        "Multi-Up Layout Matrix Rule:",
+                        ["Cut and Stack", "Repeat / Step & Repeat"],
+                        key="booklet_sub_layout_input",
+                        help="Choose whether multi-up copies stack through sheets or repeat adjacent on individual sheets."
                     )
+                with b_lay_col2:
+                    booklet_copies = st.number_input(
+                        "Booklet Copies on One Sheet:",
+                        min_value=1,
+                        max_value=max(1, total_ups_preview // 2),
+                        value=1,
+                        step=1,
+                        key="booklet_copies_input",
+                        help="How many copies of the booklet should fit onto a single media sheet footprint."
+                    )
+
+                booklet_creep_mm = st.number_input(
+                    "Spine Creep Offset Shift Value (mm):",
+                    min_value=0.0,
+                    max_value=10.0,
+                    value=0.0,
+                    step=0.05,
+                    key="booklet_creep_input",
+                    help="Progressively shifts interior booklet pages closer to the spine line to correct layout drift caused by folding thick paper signatures."
+                )
+
+                # Grid capacity safety warning parameters
+                cols_required = int(booklet_copies) * 2
+                if int(cols_input) < cols_required:
+                    st.warning(f"⚠️ **Grid Capacity Mismatch:** Imposing a booklet requires a minimum of 2 columns (Left page next to Right page). To place **{booklet_copies} copies**, your Column layout above must be at least **{cols_required} columns**.")
 
         with col_imp2:
             trim_w = st.number_input("Finished Trim Width (mm):", min_value=5.0, max_value=500.0, value=90.0, step=0.5)
