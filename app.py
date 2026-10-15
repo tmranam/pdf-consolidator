@@ -687,6 +687,7 @@ def execute_pdf_imposition(input_bytes, config):
                 if input_page_idx >= total_input_pages:
                     continue
 
+                # Create a clean, decoupled clone of the page object to prevent global state leaks
                 original_page = page_pool[input_page_idx]
                 input_page = PageObject.create_blank_page(
                     width=original_page.mediabox.width, 
@@ -694,23 +695,29 @@ def execute_pdf_imposition(input_bytes, config):
                 )
                 input_page.merge_page(original_page)
 
+                # Fetch original content dimensions
                 orig_ll_x = float(input_page.mediabox.lower_left[0])
                 orig_ll_y = float(input_page.mediabox.lower_left[1])
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
 
-                crop_w_pt = trim_w + (gutter_x / 2.0)
-                crop_h_pt = trim_h + (gutter_y / 2.0)
+                # --- STEP 1: CALCULATE THE CROPPING WINDOW (FINISHED SIZE + BLEED) ---
+                # Your file is restricted to the finished size plus the bleed amount on each side.
+                # It clips right at the edge of the bleed envelope so adjacent cells do not overlap.
+                crop_w_pt = trim_w + (2 * bleed)
+                crop_h_pt = trim_h + (2 * bleed)
 
                 crop_ll_x = orig_ll_x + ((orig_w - crop_w_pt) / 2.0)
                 crop_ll_y = orig_ll_y + ((orig_h - crop_h_pt) / 2.0)
                 crop_ur_x = crop_ll_x + crop_w_pt
                 crop_ur_y = crop_ll_y + crop_h_pt
 
+                # Apply hard physical bounding boxes directly to the page metrics architecture
                 crop_rect = RectangleObject([crop_ll_x, crop_ll_y, crop_ur_x, crop_ur_y])
                 input_page.mediabox = crop_rect
                 input_page.cropbox = crop_rect
 
+                # --- STEP 2: CALCULATE PLACEMENT ON PRESS SHEET ---
                 if is_back_page:
                     c_eff = cols - 1 - c
                     x_pos = media_w - center_offset_x_right - (c_eff * step_x) - trim_w
@@ -719,22 +726,26 @@ def execute_pdf_imposition(input_bytes, config):
 
                 y_pos = media_h - center_offset_y - (r * step_y) - trim_h
 
+                # Scale mapping parameters
                 if fit_to_size:
-                    scale = min(trim_w / crop_w_pt, trim_h / crop_h_pt)
+                    scale = min(trim_w / trim_w, trim_h / trim_h)  # Locks ratio strictly onto the finished size limits
                 else:
                     scale = 1.0 * mag_factor
 
                 last_computed_scale = scale
 
-                tx = x_pos - (gutter_x / 4.0 * scale) - (crop_ll_x * scale)
-                ty = y_pos - (gutter_y / 4.0 * scale) - (crop_ll_y * scale)
+                # --- STEP 3: TRANSFORM AND SHIFT TO CELL POSITION ---
+                # Positions the clipped image matrix correctly, aligning the finished art lines
+                tx = x_pos - (bleed * scale) - (crop_ll_x * scale)
+                ty = y_pos - (bleed * scale) - (crop_ll_y * scale)
 
                 op_transform = Transformation().scale(scale, scale).translate(tx, ty)
                 sheet.merge_transformed_page(input_page, op_transform, expand=False)
 
+                # --- STEP 4: RENDER PLACEMENT TRIMS (STAYS LOCKED AT FINISHED EDGES) ---
                 if mark_style != "None":
                     mark_len = 12.0
-                    offset = bleed + 3.0
+                    offset = 3.0  # Safe clearance offset outside the bleed envelope line
                     x1, x2 = x_pos, x_pos + trim_w
                     y1, y2 = y_pos, y_pos + trim_h
 
