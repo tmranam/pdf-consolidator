@@ -633,7 +633,7 @@ def execute_pdf_imposition(input_bytes, config):
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     last_computed_scale = 1.0
 
-        for sheet_idx in range(total_sheets):
+           for sheet_idx in range(total_sheets):
         sheet = PageObject.create_blank_page(width=media_w, height=media_h)
         is_back_page = is_duplex and (sheet_idx % 2 == 1)
 
@@ -687,7 +687,6 @@ def execute_pdf_imposition(input_bytes, config):
                 if input_page_idx >= total_input_pages:
                     continue
 
-                # Create a clean, decoupled clone of the page object to prevent global state leaks
                 original_page = page_pool[input_page_idx]
                 input_page = PageObject.create_blank_page(
                     width=original_page.mediabox.width, 
@@ -695,29 +694,23 @@ def execute_pdf_imposition(input_bytes, config):
                 )
                 input_page.merge_page(original_page)
 
-                # Fetch original content dimensions
                 orig_ll_x = float(input_page.mediabox.lower_left[0])
                 orig_ll_y = float(input_page.mediabox.lower_left[1])
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
 
-                # --- STEP 1: CALCULATE THE STRICT CROP DIMENSIONS ---
-                # e.g., Finished Width (210mm) + Half of Gutter Gap (10mm / 2 = 5mm) = 215mm limit
                 crop_w_pt = trim_w + (gutter_x / 2.0)
                 crop_h_pt = trim_h + (gutter_y / 2.0)
 
-                # Center the crop box relative to the original source artwork dimensions
                 crop_ll_x = orig_ll_x + ((orig_w - crop_w_pt) / 2.0)
                 crop_ll_y = orig_ll_y + ((orig_h - crop_h_pt) / 2.0)
                 crop_ur_x = crop_ll_x + crop_w_pt
                 crop_ur_y = crop_ll_y + crop_h_pt
 
-                # Apply hard physical bounding boxes directly to the page metrics architecture
                 crop_rect = RectangleObject([crop_ll_x, crop_ll_y, crop_ur_x, crop_ur_y])
                 input_page.mediabox = crop_rect
                 input_page.cropbox = crop_rect
 
-                # --- STEP 2: CALCULATE PLACEMENT ON PRESS SHEET ---
                 if is_back_page:
                     c_eff = cols - 1 - c
                     x_pos = media_w - center_offset_x_right - (c_eff * step_x) - trim_w
@@ -726,7 +719,6 @@ def execute_pdf_imposition(input_bytes, config):
 
                 y_pos = media_h - center_offset_y - (r * step_y) - trim_h
 
-                # Base scaling calculations on the newly cropped size, not the raw original file sizes
                 if fit_to_size:
                     scale = min(trim_w / crop_w_pt, trim_h / crop_h_pt)
                 else:
@@ -734,15 +726,12 @@ def execute_pdf_imposition(input_bytes, config):
 
                 last_computed_scale = scale
 
-                # --- STEP 3: TRANSFORM AND SHIFT TO CELL POSITION ---
-                # Offset positions shift slightly outward to keep the trimmed gutter segments centered
                 tx = x_pos - (gutter_x / 4.0 * scale) - (crop_ll_x * scale)
                 ty = y_pos - (gutter_y / 4.0 * scale) - (crop_ll_y * scale)
 
                 op_transform = Transformation().scale(scale, scale).translate(tx, ty)
                 sheet.merge_transformed_page(input_page, op_transform, expand=False)
 
-                # --- STEP 4: RENDER PLACEMENT MARKS ---
                 if mark_style != "None":
                     mark_len = 12.0
                     offset = bleed + 3.0
@@ -767,7 +756,6 @@ def execute_pdf_imposition(input_bytes, config):
                     if draw_all or (is_right_edge and is_bottom_edge):
                         mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
                         mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
-
 
         # --- PAGE IDENTIFIER: draw "{text} Page X of N" at the chosen edge ---
         should_draw_id = page_id_enabled and page_id_text.strip() != ""
