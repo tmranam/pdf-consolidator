@@ -633,7 +633,7 @@ def execute_pdf_imposition(input_bytes, config):
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     last_computed_scale = 1.0
 
-    # -------------------------------------------------------------------------
+        # -------------------------------------------------------------------------
     # BOOKLET PRE-PROCESSING COMPONENT
     # -------------------------------------------------------------------------
     is_booklet = (layout_mode == "Booklet")
@@ -642,23 +642,23 @@ def execute_pdf_imposition(input_bytes, config):
     creep_per_sheet_pt = float(config.get('booklet_creep', 0.0)) * (72.0 / 25.4)
 
     if is_booklet:
-        # Force a multiple of 4 pages by appending blank slots if necessary
+        # Determine signature sheets allocated per view (how many rows are on one parent sheet)
+        # In Cut & Stack, rows stack consecutive sheets. In Repeat, it's 1 distinct sheet per row layer.
+        sheets_per_canvas_view = rows if booklet_sub_mode == "Cut and Stack" else 1
+        
         booklet_pool = list(reader.pages)
         while len(booklet_pool) % 4 != 0:
             blank = PageObject.create_blank_page(width=media_w, height=media_h)
             booklet_pool.append(blank)
         
         total_input_pages = len(booklet_pool)
-        booklet_sheets_needed = total_input_pages // 4  # Total distinct paper leaves needed per copy
+        total_distinct_signature_leaves = total_input_pages // 4
         
-        # Override structural sheet tracking metrics 
-        if booklet_sub_mode == "Cut and Stack":
-            total_sheets = booklet_sheets_needed * 2  # Front + Back sequences multiplier
-        else:
-            # Repeat layout matches a single booklet's sheet footprint depth
-            total_sheets = booklet_sheets_needed * 2
-            
-        total_physical_sheets = total_sheets // 2
+        # Calculate how many duplex press sheets (front+back pairs) we need in total depth
+        press_sheets_needed = math.ceil(total_distinct_signature_leaves / sheets_per_canvas_view)
+        
+        total_sheets = press_sheets_needed * 2  # Double-sided tracking
+        total_physical_sheets = press_sheets_needed
 
     # -------------------------------------------------------------------------
     # MAIN SHEET PROCESSING LAYOUT MATRIX LOOP
@@ -667,11 +667,11 @@ def execute_pdf_imposition(input_bytes, config):
 
     for sheet_idx in range(total_sheets):
         sheet = PageObject.create_blank_page(width=media_w, height=media_h)
-        is_back_page = (sheet_idx % 2 == 1)  # Booklet mode enforces Duplex formatting
+        is_back_page = (sheet_idx % 2 == 1)
 
-        # Sheet tracking calculations
-        current_stack_layer = sheet_idx // 2
-        physical_sheet_number = current_stack_layer + 1
+        # Base sheet pairing layer offsets
+        press_layer_idx = sheet_idx // 2
+        physical_sheet_number = press_layer_idx + 1
 
         mark_packet = io.BytesIO()
         mark_can = canvas.Canvas(mark_packet, pagesize=(media_w, media_h))
@@ -685,36 +685,40 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 # --- LAYOUT LOGIC ARBITRATION MATRIX ---
                 if is_booklet:
-                    # Determine booklet slot pair grouping columns (left page vs right page)
-                    # Every individual booklet needs a 2-column slot lane (Left/Right pairing)
+                    # Column layout strategy: track booklet duplicate blocks horizontally across columns
                     booklet_instance_idx = c // 2
-                    
                     if booklet_instance_idx >= b_copies:
-                        continue  # Protect bounds limit grid allocations
+                        continue
                         
                     is_slot_right_side = (c % 2 == 1)
 
-                    # Compute distinct leaf tracking structures 
+                    # Dynamic Signature Sheet Routing Logic
                     if booklet_sub_mode == "Cut and Stack":
-                        # Stacks run downwards through structural sheets
-                        target_booklet_sheet = current_stack_layer
+                        # Row index 'r' steps down through consecutive signature layers vertically
+                        target_booklet_sheet = (press_layer_idx * rows) + r
                     else:
-                        # Step & Repeat uses the same sheet identity layer layout across columns
-                        target_booklet_sheet = current_stack_layer
+                        # Step & Repeat locks all row elements to the identical signature sheet layer index
+                        target_booklet_sheet = press_layer_idx
 
-                    # Saddle-Stitch Pagination Formula Core
-                    # Map signatures relative to the booklet page limits bounds
+                    # Skip calculation if the page counts fall outside your asset boundaries
+                    if target_booklet_sheet >= total_distinct_signature_leaves:
+                        continue
+
+                    # Saddle-Stitch Pagination Formula (Locked relative to specific target signature sheet)
                     low_page = (target_booklet_sheet * 2) + 1
                     high_page = total_input_pages - (target_booklet_sheet * 2)
 
                     if not is_back_page:
                         # Front Signatures: [High Page (Even)] on Left, [Low Page (Odd)] on Right
                         if not is_slot_right_side:
-                            input_page_idx = high_page - 1  # 0-indexed adjustment
+                            input_page_idx = high_page - 1
                         else:
                             input_page_idx = low_page - 1
                     else:
-                        # Back Signatures (Flipped for backing alignment): [Low Page] on Left, [High Page] on Right
+                        # Back Signatures (Flipped for double-sided backing alignment): [Low Page] on Left, [High Page] on Right
+                        # Mirror columns on backing flips to keep pages perfectly matched back-to-back
+                        c_logical = c if booklet_sub_mode == "Cut and Stack" else c
+                        # Map right/left slots based on back view flip positions
                         if not is_slot_right_side:
                             input_page_idx = (low_page + 1) - 1
                         else:
@@ -725,7 +729,7 @@ def execute_pdf_imposition(input_bytes, config):
                     original_page = booklet_pool[input_page_idx]
 
                 else:
-                    # Standard Non-Booklet Sequencing Fallback
+                    # Standard Non-Booklet Sequencing Fallback Channels
                     if "Cut and Stack" in layout_mode:
                         if is_duplex:
                             if is_back_page:
@@ -752,17 +756,17 @@ def execute_pdf_imposition(input_bytes, config):
                         continue
                     original_page = page_pool[input_page_idx]
 
-                # Isolate target page via byte stream parsing block 
+                # Fully isolate page objects via in-memory stream compilation
                 isolate_writer = PdfWriter()
                 isolate_writer.add_page(original_page)
                 isolate_buf = io.BytesIO()
                 isolate_writer.write(isolate_buf)
                 isolate_buf.seek(0)
                 isolate_reader = PdfReader(isolate_buf)
-                input_page = isolate_reader.pages[0]
+                input_page = isolate_reader.pages
 
-                orig_ll_x = float(input_page.mediabox.lower_left[0])
-                orig_ll_y = float(input_page.mediabox.lower_left[1])
+                orig_ll_x = float(input_page.mediabox.lower_left)
+                orig_ll_y = float(input_page.mediabox.lower_left)
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
 
@@ -798,23 +802,18 @@ def execute_pdf_imposition(input_bytes, config):
                 tx = x_pos - (max_safe_bleed_x * scale) - (crop_ll_x * scale)
                 ty = y_pos - (max_safe_bleed_y * scale) - (crop_ll_y * scale)
 
-                # --- STEP 2.5: CALCULATE SPINE CREEP INCREMENT SHIFTS ---
+                # --- STEP 2.5: PROGRESSIVE SPINE CREEP INCREMENT ---
                 if is_booklet and creep_per_sheet_pt > 0:
-                    # Creep shifts pages progressively inward based on sheet depth layer
-                    # Layer 0 (outer sheet) has 0 creep. Layer 1 moves inward by 1 * creep value, etc.
                     current_creep_offset = target_booklet_sheet * creep_per_sheet_pt * scale
-                    
                     if is_slot_right_side:
-                        # Shift right-hand pages leftwards toward the spine
                         tx -= current_creep_offset
                     else:
-                        # Shift left-hand pages rightwards toward the spine
                         tx += current_creep_offset
 
                 op_transform = Transformation().scale(scale, scale).translate(tx, ty)
                 sheet.merge_transformed_page(input_page, op_transform, expand=False)
 
-                # --- STEP 4: INTERSECTING TRIM MARKS ENGINE (CONTEXT-AWARE) ---
+                # --- STEP 4: CONTEXT-AWARE CROP MARKS ---
                 if mark_style != "None":
                     mark_len = 12.0
                     offset = 2.0
