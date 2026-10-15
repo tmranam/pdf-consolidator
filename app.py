@@ -687,7 +687,6 @@ def execute_pdf_imposition(input_bytes, config):
                 if input_page_idx >= total_input_pages:
                     continue
 
-                # Create a clean, decoupled clone of the page object to prevent global state leaks
                 original_page = page_pool[input_page_idx]
                 input_page = PageObject.create_blank_page(
                     width=original_page.mediabox.width, 
@@ -695,15 +694,12 @@ def execute_pdf_imposition(input_bytes, config):
                 )
                 input_page.merge_page(original_page)
 
-                # Fetch original content dimensions
-                orig_ll_x = float(input_page.mediabox.lower_left[0])
-                orig_ll_y = float(input_page.mediabox.lower_left[1])
+                orig_ll_x = float(input_page.mediabox.lower_left)
+                orig_ll_y = float(input_page.mediabox.lower_left)
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
 
-                # --- STEP 1: CALCULATE THE CROPPING WINDOW (FINISHED SIZE + BLEED) ---
-                # Your file is restricted to the finished size plus the bleed amount on each side.
-                # It clips right at the edge of the bleed envelope so adjacent cells do not overlap.
+                # --- STEP 1: DEFINE BLEED ENVELOPE BOUNDS ---
                 crop_w_pt = trim_w + (2 * bleed)
                 crop_h_pt = trim_h + (2 * bleed)
 
@@ -712,12 +708,11 @@ def execute_pdf_imposition(input_bytes, config):
                 crop_ur_x = crop_ll_x + crop_w_pt
                 crop_ur_y = crop_ll_y + crop_h_pt
 
-                # Apply hard physical bounding boxes directly to the page metrics architecture
                 crop_rect = RectangleObject([crop_ll_x, crop_ll_y, crop_ur_x, crop_ur_y])
                 input_page.mediabox = crop_rect
                 input_page.cropbox = crop_rect
 
-                # --- STEP 2: CALCULATE PLACEMENT ON PRESS SHEET ---
+                # --- STEP 2: POSITION CALCULATION ON SHEET ---
                 if is_back_page:
                     c_eff = cols - 1 - c
                     x_pos = media_w - center_offset_x_right - (c_eff * step_x) - trim_w
@@ -726,47 +721,52 @@ def execute_pdf_imposition(input_bytes, config):
 
                 y_pos = media_h - center_offset_y - (r * step_y) - trim_h
 
-                # Scale mapping parameters
                 if fit_to_size:
-                    scale = min(trim_w / trim_w, trim_h / trim_h)  # Locks ratio strictly onto the finished size limits
+                    scale = min(trim_w / trim_w, trim_h / trim_h)
                 else:
                     scale = 1.0 * mag_factor
 
                 last_computed_scale = scale
 
-                # --- STEP 3: TRANSFORM AND SHIFT TO CELL POSITION ---
-                # Positions the clipped image matrix correctly, aligning the finished art lines
                 tx = x_pos - (bleed * scale) - (crop_ll_x * scale)
                 ty = y_pos - (bleed * scale) - (crop_ll_y * scale)
 
                 op_transform = Transformation().scale(scale, scale).translate(tx, ty)
                 sheet.merge_transformed_page(input_page, op_transform, expand=False)
 
-                # --- STEP 4: RENDER PLACEMENT TRIMS (STAYS LOCKED AT FINISHED EDGES) ---
+                # --- STEP 3: INTERSECTING CROP MARKS ENGINE (CROSS-HAIRS) ---
                 if mark_style != "None":
                     mark_len = 12.0
-                    offset = 3.0  # Safe clearance offset outside the bleed envelope line
+                    offset = 3.0  # Clear space out from the trim edge line
+                    
                     x1, x2 = x_pos, x_pos + trim_w
                     y1, y2 = y_pos, y_pos + trim_h
 
+                    # Determine grid boundaries relative to current position
                     is_left_edge = (c == 0) if not is_back_page else (c == cols - 1)
                     is_right_edge = (c == cols - 1) if not is_back_page else (c == 0)
                     is_top_edge = (r == 0)
                     is_bottom_edge = (r == rows - 1)
-                    draw_all = (mark_style == "All Individual Items")
 
-                    if draw_all or (is_left_edge and is_top_edge):
-                        mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)
-                        mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)
-                    if draw_all or (is_right_edge and is_top_edge):
-                        mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)
-                        mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)
-                    if draw_all or (is_left_edge and is_bottom_edge):
-                        mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)
-                        mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)
-                    if draw_all or (is_right_edge and is_bottom_edge):
-                        mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)
-                        mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)
+                    # Top-Left Corner Marks Allocation
+                    if mark_style == "All Individual Items" or (is_left_edge or is_top_edge):
+                        mark_can.line(x1, y2 + offset, x1, y2 + offset + mark_len)  # Vertical
+                        mark_can.line(x1 - offset, y2, x1 - offset - mark_len, y2)  # Horizontal
+
+                    # Top-Right Corner Marks Allocation
+                    if mark_style == "All Individual Items" or (is_right_edge or is_top_edge):
+                        mark_can.line(x2, y2 + offset, x2, y2 + offset + mark_len)  # Vertical
+                        mark_can.line(x2 + offset, y2, x2 + offset + mark_len, y2)  # Horizontal
+
+                    # Bottom-Left Corner Marks Allocation
+                    if mark_style == "All Individual Items" or (is_left_edge or is_bottom_edge):
+                        mark_can.line(x1, y1 - offset, x1, y1 - offset - mark_len)  # Vertical
+                        mark_can.line(x1 - offset, y1, x1 - offset - mark_len, y1)  # Horizontal
+
+                    # Bottom-Right Corner Marks Allocation
+                    if mark_style == "All Individual Items" or (is_right_edge or is_bottom_edge):
+                        mark_can.line(x2, y1 - offset, x2, y1 - offset - mark_len)  # Vertical
+                        mark_can.line(x2 + offset, y1, x2 + offset + mark_len, y1)  # Horizontal
 
         # --- PAGE IDENTIFIER: draw "{text} Page X of N" at the chosen edge ---
         should_draw_id = page_id_enabled and page_id_text.strip() != ""
