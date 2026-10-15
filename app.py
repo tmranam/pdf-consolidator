@@ -829,39 +829,19 @@ def execute_pdf_imposition(input_bytes, config):
                     safe_len_left   = mark_len if is_left_edge else max(1.0, (gutter_x / 2.0) - offset)
                     safe_len_right  = mark_len if is_right_edge else max(1.0, (gutter_x / 2.0) - offset)
                     safe_len_top    = mark_len if is_top_edge else max(1.0, (gutter_y / 2.0) - offset)
-
-                    safe_len_bottom = base_mark_len if is_bottom_edge else max(1.0, (gutter_y / 2.0) - offset)
-
-                    # --- TOP-LEFT CORNER MARKS ---
+                    safe_len_bottom = mark_len if is_bottom_edge else max(1.0, (gutter_y / 2.0) - offset)
                     if mark_style == "All Individual Items" or (is_left_edge or is_top_edge):
-                        # Vertical line (points upwards)
-                        mark_can.line(x1, y2 + offset, x1, y2 + offset + safe_len_top)  
-                        # Horizontal line (points leftwards)
-                        mark_can.line(x1 - offset, y2, x1 - offset - safe_len_left, y2)  
-
-                    # --- TOP-RIGHT CORNER MARKS ---
-                    if mark_style == "All Individual Items" or (is_right_edge or is_top_edge):
-                        # Vertical line (points upwards)
-                        mark_can.line(x2, y2 + offset, x2, y2 + offset + safe_len_top)  
-                        # Horizontal line (points rightwards)
-                        mark_can.line(x2 + offset, y2, x2 + offset + safe_len_right, y2)  
-
-                    # --- BOTTOM-LEFT CORNER MARKS ---
-                    if mark_style == "All Individual Items" or (is_left_edge or is_bottom_edge):
-                        # Vertical line (points downwards)
-                        mark_can.line(x1, y1 - offset, x1, y1 - offset - safe_len_bottom)  
-                        # Horizontal line (points leftwards)
-                        mark_can.line(x1 - offset, y1, x1 - offset - safe_len_left, y1)  
-
-                    # --- BOTTOM-RIGHT CORNER MARKS ---
-                    if mark_style == "All Individual Items" or (is_right_edge or is_bottom_edge):
-                        # Vertical line (points downwards)
-                        mark_can.line(x2, y1 - offset, x2, y1 - offset - safe_len_bottom)  
-                        # Horizontal line (points rightwards)
-                        mark_can.line(x2 + offset, y1, x2 + offset + safe_len_right, y1)  
-
-  
-
+                        mark_can.line(x1, y2 + offset, x1, y2 + offset + safe_len_top)
+                        mark_can.line(x1 - offset, y2, x1 - offset - safe_len_left, y2)
+                        if mark_style == "All Individual Items" or (is_right_edge or is_top_edge):
+                        mark_can.line(x2, y2 + offset, x2, y2 + offset + safe_len_top)
+                        mark_can.line(x2 + offset, y2, x2 + offset + safe_len_right, y2)
+                        if mark_style == "All Individual Items" or (is_left_edge or is_bottom_edge):
+                        mark_can.line(x1, y1 - offset, x1, y1 - offset - safe_len_bottom)
+                        mark_can.line(x1 - offset, y1, x1 - offset - safe_len_left, y1)
+                        if mark_style == "All Individual Items" or (is_right_edge or is_bottom_edge):
+                        mark_can.line(x2, y1 - offset, x2, y1 - offset - safe_len_bottom)
+                        mark_can.line(x2 + offset, y1, x2 + offset + safe_len_right, y1)
         # --- PAGE IDENTIFIER: draw "{text} Page X of N" at the chosen edge ---
         should_draw_id = page_id_enabled and page_id_text.strip() != ""
         if should_draw_id and is_back_page and page_id_sides == "Front Only":
