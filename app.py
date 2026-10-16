@@ -633,12 +633,10 @@ def execute_pdf_imposition(input_bytes, config):
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     last_computed_scale = 1.0
 
-    # -------------------------------------------------------------------------
+       # -------------------------------------------------------------------------
     # BOOKLET PRE-PROCESSING COMPONENT
     # -------------------------------------------------------------------------
-    is_booklet = (layout_mode == "Booklet")
-    booklet_sub_mode = config.get('booklet_sub_layout', "Cut and Stack")
-    b_copies = int(config.get('booklet_copies', 1))
+    is_booklet = "Booklet" in layout_mode
     creep_per_sheet_pt = float(config.get('booklet_creep', 0.0)) * (72.0 / 25.4)
 
     if is_booklet:
@@ -650,14 +648,13 @@ def execute_pdf_imposition(input_bytes, config):
         total_input_pages = len(booklet_pool)
         total_distinct_signature_leaves = total_input_pages // 4
         
-        # Calculate sheet tracking scope limits based on selected multi-up sub-mode
-        if booklet_sub_mode == "Cut and Stack":
-            # Rows consume consecutive signature pages, packing more onto one parent sheet
+        # Determine signature sheets allocated based on the unified configuration string
+        if "Cut and Stack" in layout_mode:
             sheets_per_canvas_view = rows
             press_sheets_needed = math.ceil(total_distinct_signature_leaves / sheets_per_canvas_view)
             total_sheets = press_sheets_needed * 2
         else:
-            # Repeat layout holds exactly ONE signature leaf layer per sheet (cloned across grid slots)
+            # Repeat layout holds exactly ONE signature leaf layer per sheet view
             press_sheets_needed = total_distinct_signature_leaves
             total_sheets = press_sheets_needed * 2
 
@@ -672,7 +669,6 @@ def execute_pdf_imposition(input_bytes, config):
         sheet = PageObject.create_blank_page(width=media_w, height=media_h)
         is_back_page = (sheet_idx % 2 == 1)
 
-        # Base sheet pairing layer offsets
         press_layer_idx = sheet_idx // 2
         physical_sheet_number = press_layer_idx + 1
 
@@ -686,9 +682,8 @@ def execute_pdf_imposition(input_bytes, config):
         for r in range(rows):
             for c in range(cols):
                 
-                               # --- LAYOUT LOGIC ARBITRATION MATRIX ---
+                # --- LAYOUT LOGIC ARBITRATION MATRIX ---
                 if is_booklet:
-                    # Map horizontal duplicate copy intervals across columns
                     booklet_instance_idx = c // 2
                     if booklet_instance_idx >= b_copies:
                         continue
@@ -696,30 +691,25 @@ def execute_pdf_imposition(input_bytes, config):
                     is_slot_right_side = (c % 2 == 1)
 
                     # Dynamic Signature Sheet Routing Logic
-                    # FIXED: Expressly checks against the absolute UI radio text options structure
-                    if "Cut and Stack" in booklet_sub_mode:
-                        # Row index 'r' steps down through consecutive signature layers vertically
+                    if "Cut and Stack" in layout_mode:
                         target_booklet_sheet = (press_layer_idx * rows) + r
                     else:
-                        # Repeat / Step & Repeat locks all row elements to the identical layer index
+                        # Repeat / Step & Repeat locks all row elements to the current sheet layer index
                         target_booklet_sheet = press_layer_idx
 
-                    # Skip calculation if the page counts fall outside your asset boundaries
                     if target_booklet_sheet >= total_distinct_signature_leaves:
                         continue
 
-                    # Saddle-Stitch Pagination Formula (Locked relative to specific target signature sheet)
+                    # Saddle-Stitch Pagination Formula
                     low_page = (target_booklet_sheet * 2) + 1
                     high_page = total_input_pages - (target_booklet_sheet * 2)
 
                     if not is_back_page:
-                        # Front Signatures: [High Page (Even)] on Left, [Low Page (Odd)] on Right
                         if not is_slot_right_side:
                             input_page_idx = high_page - 1
                         else:
                             input_page_idx = low_page - 1
                     else:
-                        # Back Signatures (Flipped for double-sided backing alignment): [Low Page] on Left, [High Page] on Right
                         if not is_slot_right_side:
                             input_page_idx = (low_page + 1) - 1
                         else:
@@ -730,7 +720,6 @@ def execute_pdf_imposition(input_bytes, config):
                     original_page = booklet_pool[input_page_idx]
 
                 else:
-
                     # Standard Non-Booklet Sequencing Fallback Channels
                     if "Cut and Stack" in layout_mode:
                         if is_duplex:
@@ -1308,13 +1297,22 @@ if st.session_state.current_page == "impose":
 
     st.divider()
 
-    # Form Submission Trigger Action Button Hook
+       # Form Submission Trigger Action Button Hook
     if st.button("Run Sheet Imposition Processing", type="primary", use_container_width=True):
         if not uploaded_impose_pdf:
             st.error("⚠️ Active source PDF file stream data must be staged before layout processing.")
         else:
             with st.spinner("Calculating layout transformations and packing pages..."):
                 try:
+                    # ================================================================
+                    # FIXED: UNIFIED STRING ROUTING CHANNEL FOR BOOKLET STYLE SELECTION
+                    # ================================================================
+                    if layout_choice == "Booklet":
+                        runtime_layout_string = f"Booklet - {booklet_sub_layout}"
+                    else:
+                        runtime_layout_string = layout_choice
+                    # ================================================================
+
                     imposition_runtime_config = {
                         'media_w': media_w_mm,
                         'media_h': media_h_mm,
@@ -1331,7 +1329,7 @@ if st.session_state.current_page == "impose":
                             'left': margin_left_mm,
                             'right': margin_right_mm,
                         },
-                        'layout_mode': layout_choice,
+                        'layout_mode': runtime_layout_string, # Fixed unified string link
                         'mix_sections': int(mix_sections_value),
                         'duplex': (print_style == "Duplex"),
                         'repeat_per_page': int(cols_input) * int(rows_input),
@@ -1344,9 +1342,11 @@ if st.session_state.current_page == "impose":
                         'page_id_margin': float(page_id_margin),
                         'page_id_position': page_id_position,
                         'page_id_sides': page_id_sides,
+                        'booklet_creep': float(booklet_creep_mm), # Safely passing booklet creep parameter
                     }
 
                     raw_input_bytes = uploaded_impose_pdf.read()
+
 
                     compiled_output_pdf, total_calculated_ups, computed_percentage = execute_pdf_imposition(raw_input_bytes, imposition_runtime_config)
 
