@@ -765,8 +765,8 @@ def execute_pdf_imposition(input_bytes, config):
                 isolate_reader = PdfReader(isolate_buf)
                 input_page = isolate_reader.pages[0]
 
-                orig_ll_x = float(input_page.mediabox.lower_left)
-                orig_ll_y = float(input_page.mediabox.lower_left)
+                orig_ll_x = float(input_page.mediabox.lower_left[0])
+                orig_ll_y = float(input_page.mediabox.lower_left[1])
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
 
