@@ -773,7 +773,8 @@ def execute_pdf_imposition(input_bytes, config):
 
                 orig_ll_x = float(input_page.mediabox.lower_left)
                 orig_ll_y = float(input_page.mediabox.lower_left)
-
+                orig_w = float(input_page.mediabox.width)
+                orig_h = float(input_page.mediabox.height)
 
                 max_safe_bleed_x = min(bleed, gutter_x / 2.0) if gutter_x > 0 else 0.0
                 max_safe_bleed_y = min(bleed, gutter_y / 2.0) if gutter_y > 0 else 0.0
