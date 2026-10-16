@@ -633,7 +633,7 @@ def execute_pdf_imposition(input_bytes, config):
     mag_factor = float(config.get('magnification_pct', 100.0)) / 100.0
     last_computed_scale = 1.0
 
-        # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # BOOKLET PRE-PROCESSING COMPONENT
     # -------------------------------------------------------------------------
     is_booklet = (layout_mode == "Booklet")
@@ -642,10 +642,6 @@ def execute_pdf_imposition(input_bytes, config):
     creep_per_sheet_pt = float(config.get('booklet_creep', 0.0)) * (72.0 / 25.4)
 
     if is_booklet:
-        # Determine signature sheets allocated per view (how many rows are on one parent sheet)
-        # In Cut & Stack, rows stack consecutive sheets. In Repeat, it's 1 distinct sheet per row layer.
-        sheets_per_canvas_view = rows if booklet_sub_mode == "Cut and Stack" else 1
-        
         booklet_pool = list(reader.pages)
         while len(booklet_pool) % 4 != 0:
             blank = PageObject.create_blank_page(width=media_w, height=media_h)
@@ -654,10 +650,17 @@ def execute_pdf_imposition(input_bytes, config):
         total_input_pages = len(booklet_pool)
         total_distinct_signature_leaves = total_input_pages // 4
         
-        # Calculate how many duplex press sheets (front+back pairs) we need in total depth
-        press_sheets_needed = math.ceil(total_distinct_signature_leaves / sheets_per_canvas_view)
-        
-        total_sheets = press_sheets_needed * 2  # Double-sided tracking
+        # Calculate sheet tracking scope limits based on selected multi-up sub-mode
+        if booklet_sub_mode == "Cut and Stack":
+            # Rows consume consecutive signature pages, packing more onto one parent sheet
+            sheets_per_canvas_view = rows
+            press_sheets_needed = math.ceil(total_distinct_signature_leaves / sheets_per_canvas_view)
+            total_sheets = press_sheets_needed * 2
+        else:
+            # Repeat layout holds exactly ONE signature leaf layer per sheet (cloned across grid slots)
+            press_sheets_needed = total_distinct_signature_leaves
+            total_sheets = press_sheets_needed * 2
+
         total_physical_sheets = press_sheets_needed
 
     # -------------------------------------------------------------------------
@@ -685,7 +688,7 @@ def execute_pdf_imposition(input_bytes, config):
                 
                 # --- LAYOUT LOGIC ARBITRATION MATRIX ---
                 if is_booklet:
-                    # Column layout strategy: track booklet duplicate blocks horizontally across columns
+                    # Map horizontal duplicate copy intervals across columns
                     booklet_instance_idx = c // 2
                     if booklet_instance_idx >= b_copies:
                         continue
@@ -697,7 +700,7 @@ def execute_pdf_imposition(input_bytes, config):
                         # Row index 'r' steps down through consecutive signature layers vertically
                         target_booklet_sheet = (press_layer_idx * rows) + r
                     else:
-                        # Step & Repeat locks all row elements to the identical signature sheet layer index
+                        # Step & Repeat locks all row and column elements to the current signature sheet layer index
                         target_booklet_sheet = press_layer_idx
 
                     # Skip calculation if the page counts fall outside your asset boundaries
@@ -716,9 +719,6 @@ def execute_pdf_imposition(input_bytes, config):
                             input_page_idx = low_page - 1
                     else:
                         # Back Signatures (Flipped for double-sided backing alignment): [Low Page] on Left, [High Page] on Right
-                        # Mirror columns on backing flips to keep pages perfectly matched back-to-back
-                        c_logical = c if booklet_sub_mode == "Cut and Stack" else c
-                        # Map right/left slots based on back view flip positions
                         if not is_slot_right_side:
                             input_page_idx = (low_page + 1) - 1
                         else:
@@ -762,11 +762,12 @@ def execute_pdf_imposition(input_bytes, config):
                 isolate_buf = io.BytesIO()
                 isolate_writer.write(isolate_buf)
                 isolate_buf.seek(0)
+                
                 isolate_reader = PdfReader(isolate_buf)
-                input_page = isolate_reader.pages[0]
+                input_page = isolate_reader.pages
 
-                orig_ll_x = float(input_page.mediabox.lower_left[0])
-                orig_ll_y = float(input_page.mediabox.lower_left[1])
+                orig_ll_x = float(input_page.mediabox.lower_left)
+                orig_ll_y = float(input_page.mediabox.lower_left)
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
 
