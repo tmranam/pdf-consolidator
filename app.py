@@ -756,7 +756,7 @@ def execute_pdf_imposition(input_bytes, config):
                         continue
                     original_page = page_pool[input_page_idx]
 
-                # Fully isolate page objects via in-memory stream compilation
+                                # Fully isolate page objects via in-memory stream compilation
                 isolate_writer = PdfWriter()
                 isolate_writer.add_page(original_page)
                 isolate_buf = io.BytesIO()
@@ -766,15 +766,19 @@ def execute_pdf_imposition(input_bytes, config):
                 isolate_reader = PdfReader(isolate_buf)
                 
                 # ================================================================
-                # FIXED: EXTRACT ACTUAL SINGLE PAGE OBJECT FROM VIRTUAL LIST INDEX 0
+                # FIXED 1: EXTRACT ACTUAL SINGLE PAGE OBJECT FROM VIRTUAL LIST INDEX 0
                 # ================================================================
-                input_page = isolate_reader.pages
+                input_page = isolate_reader.pages[0]
                 # ================================================================
 
-                orig_ll_x = float(input_page.mediabox.lower_left)
-                orig_ll_y = float(input_page.mediabox.lower_left)
+                # ================================================================
+                # FIXED 2: SAFELY PARSE THE TUPLE EXTENSION INDICES DIRECTLY
+                # ================================================================
+                orig_ll_x = float(input_page.mediabox.lower_left[0])
+                orig_ll_y = float(input_page.mediabox.lower_left[1])
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
+                # ================================================================
 
                 max_safe_bleed_x = min(bleed, gutter_x / 2.0) if gutter_x > 0 else 0.0
                 max_safe_bleed_y = min(bleed, gutter_y / 2.0) if gutter_y > 0 else 0.0
@@ -795,6 +799,7 @@ def execute_pdf_imposition(input_bytes, config):
                     c_eff = cols - 1 - c
                     x_pos = media_w - center_offset_x_right - (c_eff * step_x) - trim_w
                 else:
+
                     x_pos = center_offset_x + (c * step_x)
 
                 y_pos = media_h - center_offset_y - (r * step_y) - trim_h
