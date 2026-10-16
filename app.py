@@ -686,7 +686,7 @@ def execute_pdf_imposition(input_bytes, config):
         for r in range(rows):
             for c in range(cols):
                 
-                # --- LAYOUT LOGIC ARBITRATION MATRIX ---
+                               # --- LAYOUT LOGIC ARBITRATION MATRIX ---
                 if is_booklet:
                     # Map horizontal duplicate copy intervals across columns
                     booklet_instance_idx = c // 2
@@ -696,11 +696,12 @@ def execute_pdf_imposition(input_bytes, config):
                     is_slot_right_side = (c % 2 == 1)
 
                     # Dynamic Signature Sheet Routing Logic
-                    if booklet_sub_mode == "Cut and Stack":
+                    # FIXED: Expressly checks against the absolute UI radio text options structure
+                    if "Cut and Stack" in booklet_sub_mode:
                         # Row index 'r' steps down through consecutive signature layers vertically
                         target_booklet_sheet = (press_layer_idx * rows) + r
                     else:
-                        # Step & Repeat locks all row and column elements to the current signature sheet layer index
+                        # Repeat / Step & Repeat locks all row elements to the identical layer index
                         target_booklet_sheet = press_layer_idx
 
                     # Skip calculation if the page counts fall outside your asset boundaries
@@ -729,6 +730,7 @@ def execute_pdf_imposition(input_bytes, config):
                     original_page = booklet_pool[input_page_idx]
 
                 else:
+
                     # Standard Non-Booklet Sequencing Fallback Channels
                     if "Cut and Stack" in layout_mode:
                         if is_duplex:
