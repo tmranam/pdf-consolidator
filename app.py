@@ -637,6 +637,7 @@ def execute_pdf_imposition(input_bytes, config):
     # BOOKLET PRE-PROCESSING COMPONENT
     # -------------------------------------------------------------------------
     is_booklet = "Booklet" in layout_mode
+    b_copies = int(config.get('booklet_copies', 1)) # FIXED: Safely extracting variable to avoid undefined NameError
     creep_per_sheet_pt = float(config.get('booklet_creep', 0.0)) * (72.0 / 25.4)
 
     if is_booklet:
@@ -722,6 +723,7 @@ def execute_pdf_imposition(input_bytes, config):
                 else:
                     # Standard Non-Booklet Sequencing Fallback Channels
                     if "Cut and Stack" in layout_mode:
+
                         if is_duplex:
                             if is_back_page:
                                 c_front = cols - 1 - c
