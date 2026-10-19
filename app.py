@@ -666,12 +666,24 @@ def execute_pdf_imposition(input_bytes, config):
     # -------------------------------------------------------------------------
     writer = PdfWriter()
 
+    # Calculate total stack layers needed for Cut & Stack / Mix mechanics
+    if is_mix_mode:
+        total_stack_layers = math.ceil(total_input_pages / mix_num_groups)
+    else:
+        total_stack_layers = math.ceil(total_input_pages / ups_per_page)
+
+    if is_duplex and (total_stack_layers % 2 != 0):
+        total_stack_layers += 1
+
     for sheet_idx in range(total_sheets):
         sheet = PageObject.create_blank_page(width=media_w, height=media_h)
         is_back_page = (sheet_idx % 2 == 1)
 
         press_layer_idx = sheet_idx // 2
         physical_sheet_number = press_layer_idx + 1
+        
+        # Track the active stack layer tier matching the physical sheet index sequence
+        current_stack_layer = press_layer_idx if is_duplex else sheet_idx
 
         mark_packet = io.BytesIO()
         mark_can = canvas.Canvas(mark_packet, pagesize=(media_w, media_h))
@@ -682,6 +694,7 @@ def execute_pdf_imposition(input_bytes, config):
 
         for r in range(rows):
             for c in range(cols):
+
                 
                 # --- LAYOUT LOGIC ARBITRATION MATRIX ---
                 if is_booklet:
