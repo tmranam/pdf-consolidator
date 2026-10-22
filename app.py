@@ -777,6 +777,7 @@ def execute_pdf_imposition(input_bytes, config):
                 input_page = isolate_reader.pages[0]
                 # ================================================================
 
+                                               
                 # ================================================================
                 # FIXED 2: SAFELY PARSE THE TUPLE EXTENSION INDICES DIRECTLY
                 # ================================================================
@@ -786,8 +787,9 @@ def execute_pdf_imposition(input_bytes, config):
                 orig_h = float(input_page.mediabox.height)
                 # ================================================================
 
-                max_safe_bleed_x = min(bleed, gutter_x / 2.0) if gutter_x > 0 else 0.0
-                max_safe_bleed_y = min(bleed, gutter_y / 2.0) if gutter_y > 0 else 0.0
+                # Direct assignment allows bleed to work even if gutters/gaps are 0
+                max_safe_bleed_x = bleed
+                max_safe_bleed_y = bleed
 
                 crop_w_pt = trim_w + (2 * max_safe_bleed_x)
                 crop_h_pt = trim_h + (2 * max_safe_bleed_y)
@@ -800,6 +802,7 @@ def execute_pdf_imposition(input_bytes, config):
                 crop_rect = RectangleObject([crop_ll_x, crop_ll_y, crop_ur_x, crop_ur_y])
                 input_page.mediabox = crop_rect
                 input_page.cropbox = crop_rect
+
 
                 if is_back_page:
                     c_eff = cols - 1 - c
