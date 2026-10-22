@@ -654,7 +654,7 @@ if st.session_state.current_page == "impose":
                     compiled_output_pdf, total_calculated_ups, computed_percentage = execute_pdf_imposition(uploaded_impose_pdf.read(), config_pack)
                     st.session_state.system_auto_scale_feedback = computed_percentage
                     st.success(f"🎉 Success! ({total_calculated_ups}-up)")
-                    st.download_button(label="⬇️ Download Output", data=compiled_output_pdf, file_name="Imposed_Result.pdf", mime="application/pdf", use_container_width=True)
+                    st.download_button(label="⬇️ Download Output", data=compiled_output_pdf, file_name=f"{os.path.splitext(uploaded_impose_pdf.name)[0]}_Imposed_{total_calculated_ups}Up.pdf", mime="application/pdf", use_container_width=True)
                 except Exception as ex_err: st.error(f"Error: {str(ex_err)}")
 
 elif st.session_state.current_page == "duplicate":
