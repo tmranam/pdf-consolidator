@@ -692,7 +692,7 @@ def execute_pdf_imposition(input_bytes, config):
         mark_can.setLineWidth(0.5)
         mark_style = config.get('trim_marks_style', "None")
 
-                for r in range(rows):
+        for r in range(rows):
             for c in range(cols):
                 
                 # --- LAYOUT LOGIC ARBITRATION MATRIX ---
