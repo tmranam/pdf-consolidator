@@ -775,34 +775,43 @@ def execute_pdf_imposition(input_bytes, config):
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
 
-                # ================================================================
-                # FIXED 1: DYNAMIC CONTROLLED BLEED BOUNDARY CLIPPING
-                # ================================================================
-                # Bleed must cleanly truncate at half the gutter width to avoid cutting 
-                # into adjacent columns/rows. If it is an outside edge, it respects full bleed.
-                max_safe_bleed_x = bleed
-                if gutter_x > 0:
-                    max_safe_bleed_x = min(bleed, gutter_x / 2.0)
-                elif cols > 1:
-                    max_safe_bleed_x = 0.0  # Stop bleed entirely if items butt up against each other
+# ================================================================
+# FIXED 1: DYNAMIC CONTROLLED BLEED BOUNDARY CLIPPING
+# ================================================================
+# Bleed must cleanly truncate at half the gutter width to avoid cutting 
+# into adjacent columns/rows. If it is an outside edge, it respects full bleed.
 
-                max_safe_bleed_y = bleed
-                if gutter_y > 0:
-                    max_safe_bleed_y = min(bleed, gutter_y / 2.0)
-                elif rows > 1:
-                    max_safe_bleed_y = 0.0  # Stop bleed entirely if items butt up against each other
+# Calculate maximum safe bleed horizontally
+if cols > 1:
+    if gutter_x > 0:
+        max_safe_bleed_x = min(bleed, gutter_x / 2.0)
+    else:
+        max_safe_bleed_x = 0.0  # Stop bleed entirely if items butt up against each other
+else:
+    max_safe_bleed_x = bleed
 
-                crop_w_pt = trim_w + (2 * max_safe_bleed_x)
-                crop_h_pt = trim_h + (2 * max_safe_bleed_y)
+# Calculate maximum safe bleed vertically
+if rows > 1:
+    if gutter_y > 0:
+        max_safe_bleed_y = min(bleed, gutter_y / 2.0)
+    else:
+        max_safe_bleed_y = 0.0  # Stop bleed entirely if items butt up against each other
+else:
+    max_safe_bleed_y = bleed
 
-                crop_ll_x = orig_ll_x + ((orig_w - crop_w_pt) / 2.0)
-                crop_ll_y = orig_ll_y + ((orig_h - crop_h_pt) / 2.0)
-                crop_ur_x = crop_ll_x + crop_w_pt
-                crop_ur_y = crop_ll_y + crop_h_pt
+# Apply the safe bleed constraints to determine the crop dimensions
+crop_w_pt = trim_w + (2 * max_safe_bleed_x)
+crop_h_pt = trim_h + (2 * max_safe_bleed_y)
 
-                crop_rect = RectangleObject([crop_ll_x, crop_ll_y, crop_ur_x, crop_ur_y])
-                input_page.mediabox = crop_rect
-                input_page.cropbox = crop_rect
+crop_ll_x = orig_ll_x + ((orig_w - crop_w_pt) / 2.0)
+crop_ll_y = orig_ll_y + ((orig_h - crop_h_pt) / 2.0)
+crop_ur_x = crop_ll_x + crop_w_pt
+crop_ur_y = crop_ll_y + crop_h_pt
+
+crop_rect = RectangleObject([crop_ll_x, crop_ll_y, crop_ur_x, crop_ur_y])
+input_page.mediabox = crop_rect
+input_page.cropbox = crop_rect
+
 
                 if is_back_page:
                     c_eff = cols - 1 - c
