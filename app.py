@@ -813,32 +813,28 @@ input_page.mediabox = crop_rect
 input_page.cropbox = crop_rect
 
 
-                if is_back_page:
-                    c_eff = cols - 1 - c
-                    x_pos = media_w - center_offset_x_right - (c_eff * step_x) - trim_w
-                else:
-                    x_pos = center_offset_x + (c * step_x)
+if is_back_page:
+    c_eff = cols - 1 - c
+    x_pos = media_w - center_offset_x_right - (c_eff * step_x) - trim_w
+else:
+    x_pos = center_offset_x + (c * step_x)
+    y_pos = media_h - center_offset_y - (r * step_y) - trim_h
+if fit_to_size:
+    scale = min(trim_w / trim_w, trim_h / trim_h)
+else:
+    scale = 1.0 * mag_factor
+    last_computed_scale = scale
+    tx = x_pos - (max_safe_bleed_x * scale) - (crop_ll_x * scale)
+    ty = y_pos - (max_safe_bleed_y * scale) - (crop_ll_y * scale)
+if is_booklet and creep_per_sheet_pt > 0:
+    current_creep_offset = target_booklet_sheet * creep_per_sheet_pt * scale
+    if is_slot_right_side:
+        tx -= current_creep_offset
+    else:
+        tx += current_creep_offset
 
-                y_pos = media_h - center_offset_y - (r * step_y) - trim_h
-
-                if fit_to_size:
-                    scale = min(trim_w / trim_w, trim_h / trim_h)
-                else:
-                    scale = 1.0 * mag_factor
-                last_computed_scale = scale
-
-                tx = x_pos - (max_safe_bleed_x * scale) - (crop_ll_x * scale)
-                ty = y_pos - (max_safe_bleed_y * scale) - (crop_ll_y * scale)
-
-                if is_booklet and creep_per_sheet_pt > 0:
-                    current_creep_offset = target_booklet_sheet * creep_per_sheet_pt * scale
-                    if is_slot_right_side:
-                        tx -= current_creep_offset
-                    else:
-                        tx += current_creep_offset
-
-                op_transform = Transformation().scale(scale, scale).translate(tx, ty)
-                sheet.merge_transformed_page(input_page, op_transform, expand=False)
+    op_transform = Transformation().scale(scale, scale).translate(tx, ty)
+    sheet.merge_transformed_page(input_page, op_transform, expand=False)
 
                 # ================================================================
                 # FIXED 2: CONTEXT-AWARE CROP MARKS WITH MINIMUM 3MM OFFSET
