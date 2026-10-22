@@ -692,9 +692,8 @@ def execute_pdf_imposition(input_bytes, config):
         mark_can.setLineWidth(0.5)
         mark_style = config.get('trim_marks_style', "None")
 
-        for r in range(rows):
+                for r in range(rows):
             for c in range(cols):
-
                 
                 # --- LAYOUT LOGIC ARBITRATION MATRIX ---
                 if is_booklet:
@@ -736,7 +735,6 @@ def execute_pdf_imposition(input_bytes, config):
                 else:
                     # Standard Non-Booklet Sequencing Fallback Channels
                     if "Cut and Stack" in layout_mode:
-
                         if is_duplex:
                             if is_back_page:
                                 c_front = cols - 1 - c
@@ -762,7 +760,7 @@ def execute_pdf_imposition(input_bytes, config):
                         continue
                     original_page = page_pool[input_page_idx]
 
-                                # Fully isolate page objects via in-memory stream compilation
+                # Fully isolate page objects via in-memory stream compilation
                 isolate_writer = PdfWriter()
                 isolate_writer.add_page(original_page)
                 isolate_buf = io.BytesIO()
@@ -770,26 +768,29 @@ def execute_pdf_imposition(input_bytes, config):
                 isolate_buf.seek(0)
                 
                 isolate_reader = PdfReader(isolate_buf)
-                
-                # ================================================================
-                # FIXED 1: EXTRACT ACTUAL SINGLE PAGE OBJECT FROM VIRTUAL LIST INDEX 0
-                # ================================================================
                 input_page = isolate_reader.pages[0]
-                # ================================================================
 
-                                               
-                # ================================================================
-                # FIXED 2: SAFELY PARSE THE TUPLE EXTENSION INDICES DIRECTLY
-                # ================================================================
                 orig_ll_x = float(input_page.mediabox.lower_left[0])
                 orig_ll_y = float(input_page.mediabox.lower_left[1])
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
-                # ================================================================
 
-                # Direct assignment allows bleed to work even if gutters/gaps are 0
+                # ================================================================
+                # FIXED 1: DYNAMIC CONTROLLED BLEED BOUNDARY CLIPPING
+                # ================================================================
+                # Bleed must cleanly truncate at half the gutter width to avoid cutting 
+                # into adjacent columns/rows. If it is an outside edge, it respects full bleed.
                 max_safe_bleed_x = bleed
+                if gutter_x > 0:
+                    max_safe_bleed_x = min(bleed, gutter_x / 2.0)
+                elif cols > 1:
+                    max_safe_bleed_x = 0.0  # Stop bleed entirely if items butt up against each other
+
                 max_safe_bleed_y = bleed
+                if gutter_y > 0:
+                    max_safe_bleed_y = min(bleed, gutter_y / 2.0)
+                elif rows > 1:
+                    max_safe_bleed_y = 0.0  # Stop bleed entirely if items butt up against each other
 
                 crop_w_pt = trim_w + (2 * max_safe_bleed_x)
                 crop_h_pt = trim_h + (2 * max_safe_bleed_y)
@@ -803,12 +804,10 @@ def execute_pdf_imposition(input_bytes, config):
                 input_page.mediabox = crop_rect
                 input_page.cropbox = crop_rect
 
-
                 if is_back_page:
                     c_eff = cols - 1 - c
                     x_pos = media_w - center_offset_x_right - (c_eff * step_x) - trim_w
                 else:
-
                     x_pos = center_offset_x + (c * step_x)
 
                 y_pos = media_h - center_offset_y - (r * step_y) - trim_h
@@ -822,7 +821,6 @@ def execute_pdf_imposition(input_bytes, config):
                 tx = x_pos - (max_safe_bleed_x * scale) - (crop_ll_x * scale)
                 ty = y_pos - (max_safe_bleed_y * scale) - (crop_ll_y * scale)
 
-                # --- STEP 2.5: PROGRESSIVE SPINE CREEP INCREMENT ---
                 if is_booklet and creep_per_sheet_pt > 0:
                     current_creep_offset = target_booklet_sheet * creep_per_sheet_pt * scale
                     if is_slot_right_side:
@@ -833,10 +831,15 @@ def execute_pdf_imposition(input_bytes, config):
                 op_transform = Transformation().scale(scale, scale).translate(tx, ty)
                 sheet.merge_transformed_page(input_page, op_transform, expand=False)
 
-                # --- STEP 4: CONTEXT-AWARE CROP MARKS ---
+                # ================================================================
+                # FIXED 2: CONTEXT-AWARE CROP MARKS WITH MINIMUM 3MM OFFSET
+                # ================================================================
                 if mark_style != "None":
                     mark_len = 12.0
-                    offset = 2.0
+                    
+                    # 3mm minimum offset converted to PDF points (3 * 72 / 25.4) = ~8.504 points
+                    offset = max(3.0 * MM_TO_PT, max_safe_bleed_x, max_safe_bleed_y)
+                    
                     x1, x2 = x_pos, x_pos + trim_w
                     y1, y2 = y_pos, y_pos + trim_h
 
@@ -849,18 +852,28 @@ def execute_pdf_imposition(input_bytes, config):
                     safe_len_right  = mark_len if is_right_edge else max(1.0, (gutter_x / 2.0) - offset)
                     safe_len_top    = mark_len if is_top_edge else max(1.0, (gutter_y / 2.0) - offset)
                     safe_len_bottom = mark_len if is_bottom_edge else max(1.0, (gutter_y / 2.0) - offset)
+                    
                     if mark_style == "All Individual Items" or (is_left_edge or is_top_edge):
-                        mark_can.line(x1, y2 + offset, x1, y2 + offset + safe_len_top)
-                        mark_can.line(x1 - offset, y2, x1 - offset - safe_len_left, y2)
+                        if safe_len_top > 0:
+                            mark_can.line(x1, y2 + offset, x1, y2 + offset + safe_len_top)
+                        if safe_len_left > 0:
+                            mark_can.line(x1 - offset, y2, x1 - offset - safe_len_left, y2)
                     if mark_style == "All Individual Items" or (is_right_edge or is_top_edge):
-                        mark_can.line(x2, y2 + offset, x2, y2 + offset + safe_len_top)
-                        mark_can.line(x2 + offset, y2, x2 + offset + safe_len_right, y2)
+                        if safe_len_top > 0:
+                            mark_can.line(x2, y2 + offset, x2, y2 + offset + safe_len_top)
+                        if safe_len_right > 0:
+                            mark_can.line(x2 + offset, y2, x2 + offset + safe_len_right, y2)
                     if mark_style == "All Individual Items" or (is_left_edge or is_bottom_edge):
-                        mark_can.line(x1, y1 - offset, x1, y1 - offset - safe_len_bottom)
-                        mark_can.line(x1 - offset, y1, x1 - offset - safe_len_left, y1)
+                        if safe_len_bottom > 0:
+                            mark_can.line(x1, y1 - offset, x1, y1 - offset - safe_len_bottom)
+                        if safe_len_left > 0:
+                            mark_can.line(x1 - offset, y1, x1 - offset - safe_len_left, y1)
                     if mark_style == "All Individual Items" or (is_right_edge or is_bottom_edge):
-                        mark_can.line(x2, y1 - offset, x2, y1 - offset - safe_len_bottom)
-                        mark_can.line(x2 + offset, y1, x2 + offset + safe_len_right, y1)
+                        if safe_len_bottom > 0:
+                            mark_can.line(x2, y1 - offset, x2, y1 - offset - safe_len_bottom)
+                        if safe_len_right > 0:
+                            mark_can.line(x2 + offset, y1, x2 + offset + safe_len_right, y1)
+
         # --- PAGE IDENTIFIER: draw "{text} Page X of N" at the chosen edge ---
         should_draw_id = page_id_enabled and page_id_text.strip() != ""
         if should_draw_id and is_back_page and page_id_sides == "Front Only":
