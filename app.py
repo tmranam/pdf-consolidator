@@ -43,6 +43,34 @@ if "current_page" not in st.session_state:
     st.session_state.current_page = "batch_consolidator"
 if "batches_subtab" not in st.session_state:
     st.session_state.batches_subtab = "batch_headers"
+# --- ADD THIS MAIN NAVIGATION MENU ---
+with st.sidebar:
+    st.title("🛠️ Main Menu")
+    
+    # Map friendly display names to your internal page keys
+    page_options = {
+        "📦 PDF Store Batch Consolidator": "batch_consolidator",
+        "📐 PDF Impose Layout Engine": "impose",
+        "📄 Duplicate Pages Tool": "duplicate",
+        "🏷️ Batches & Labels Dashboard": "batches_and_labels",
+        "⚙️ General Settings": "general"
+    }
+    
+    # Get the display names and find the index of the current page
+    display_names = list(page_options.keys())
+    internal_keys = list(page_options.values())
+    default_index = internal_keys.index(st.session_state.current_page) if st.session_state.current_page in internal_keys else 0
+    
+    selected_display = st.radio(
+        "Navigate to:",
+        options=display_names,
+        index=default_index
+    )
+    
+    # Update session state based on user selection
+    st.session_state.current_page = page_options[selected_display]
+# -------------------------------------
+    
 def create_header_pdf(metadata_dict, total_pages, page_width=612, page_height=792):
     packet = io.BytesIO()
     can = canvas.Canvas(packet, pagesize=(float(page_width), float(page_height)))
