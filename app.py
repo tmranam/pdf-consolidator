@@ -43,11 +43,11 @@ if "current_page" not in st.session_state:
     st.session_state.current_page = "batch_consolidator"
 if "batches_subtab" not in st.session_state:
     st.session_state.batches_subtab = "batch_headers"
-# --- ADD THIS MAIN NAVIGATION MENU ---
+
+# --- MAIN NAVIGATION MENU ---
 with st.sidebar:
     st.title("🛠️ Main Menu")
     
-    # Map friendly display names to your internal page keys
     page_options = {
         "📦 PDF Store Batch Consolidator": "batch_consolidator",
         "📐 PDF Impose Layout Engine": "impose",
@@ -56,7 +56,6 @@ with st.sidebar:
         "⚙️ General Settings": "general"
     }
     
-    # Get the display names and find the index of the current page
     display_names = list(page_options.keys())
     internal_keys = list(page_options.values())
     default_index = internal_keys.index(st.session_state.current_page) if st.session_state.current_page in internal_keys else 0
@@ -67,7 +66,6 @@ with st.sidebar:
         index=default_index
     )
     
-    # Update session state based on user selection
     st.session_state.current_page = page_options[selected_display]
 # -------------------------------------
     
@@ -212,10 +210,9 @@ def create_outside_work_label_file(supplier, job_no, client, job_title, qty_this
     packet.seek(0)
     return packet
 
-def create_labels_pdf(rows, cols, label_w_pt, label_h_pt, gutter_x_pt, gutter_y_pt, margin_x_pt, margin_y_pt, lines_config, total_labels, include_numbering, breaks_configs=None):
+def create_labels_pdf(media_w_pt, media_h_pt, rows, cols, label_w_pt, label_h_pt, gutter_x_pt, gutter_y_pt, margin_x_pt, margin_y_pt, lines_config, total_labels, include_numbering, breaks_configs=None):
     packet = io.BytesIO()
-    can = canvas.Canvas(packet, pagesize=A4)
-    a4_w, a4_h = A4
+    can = canvas.Canvas(packet, pagesize=(media_w_pt, media_h_pt))
     
     if not breaks_configs:
         breaks_configs = [{"count": total_labels, "include_numbering": include_numbering, "num_mode": "Restart from new number", "start_num": 1, "end_num": total_labels, "lines": lines_config, "total_labels_global": total_labels}]
@@ -241,7 +238,7 @@ def create_labels_pdf(rows, cols, label_w_pt, label_h_pt, gutter_x_pt, gutter_y_
                     break
                 
                 x_left = margin_x_pt + c * (label_w_pt + gutter_x_pt)
-                y_top = a4_h - margin_y_pt - r * (label_h_pt + gutter_y_pt)
+                y_top = media_h_pt - margin_y_pt - r * (label_h_pt + gutter_y_pt)
                 center_x = x_left + (label_w_pt / 2.0)
                 
                 current_label_data = all_computed_labels[label_ptr]
@@ -280,6 +277,7 @@ def compute_grid_positions(media_w, media_h, trim_w, trim_h, gutter_x, gutter_y,
         for c in range(cols):
             positions.append({'row': r, 'col': c, 'x': center_offset_x + (c * step_x), 'y': media_h - center_offset_y - (r * step_y) - trim_h})
     return {'positions': positions, 'grid_w': grid_w, 'grid_h': grid_h, 'avail_w': avail_w, 'avail_h': avail_h, 'center_offset_x': center_offset_x, 'center_offset_y': center_offset_y}
+
 def execute_pdf_imposition(input_bytes, config):
     MM_TO_PT = 72.0 / 25.4
     media_w = float(config.get('media_w', 320.0)) * MM_TO_PT
@@ -431,9 +429,6 @@ def execute_pdf_imposition(input_bytes, config):
                 orig_w = float(input_page.mediabox.width)
                 orig_h = float(input_page.mediabox.height)
 
-                # ================================================================
-                # FIXED 1: INDENTATION ERROR CLEARED DOWN THROUGH SUB-BLOCK COORDS
-                # ================================================================
                 if cols > 1:
                     max_safe_bleed_x = min(bleed, gutter_x / 2.0) if gutter_x > 0 else 0.0
                 else:
@@ -470,9 +465,6 @@ def execute_pdf_imposition(input_bytes, config):
 
                 sheet.merge_transformed_page(input_page, Transformation().scale(scale, scale).translate(tx, ty), expand=False)
 
-                # ================================================================
-                # FIXED 2: CONTEXT-AWARE CROP MARKS WITH MINIMUM 3MM OFFSET
-                # ================================================================
                 if mark_style != "None":
                     mark_len = 12.0
                     offset = max(3.0 * MM_TO_PT, max_safe_bleed_x, max_safe_bleed_y)
@@ -593,6 +585,7 @@ def render_layout_preview(media_w_mm, media_h_mm, trim_w_mm, trim_h_mm, bleed_mm
     if not fits: title += "  \u26A0 DOES NOT FIT"
     svg_parts.append(f'<text x="{canvas_w/2}" y="14" font-size="12" fill="#333" text-anchor="middle">{title}</text></svg>')
     return "".join(svg_parts)
+
 if st.session_state.current_page == "impose":
     st.subheader("📐 PDF Impose Layout Engine")
     st.write("Upload source materials to impose, scale, and arrange pages for high-volume production presses.")
@@ -708,6 +701,7 @@ elif st.session_state.current_page == "duplicate":
             pdf_writer.write(buf)
             st.success("Done!")
             st.download_button(label="⬇️ Download", data=buf.getvalue(), file_name="Duplicated.pdf", mime="application/pdf")
+
 elif st.session_state.current_page == "batch_consolidator":
     st.subheader("📦 PDF Store Batch Consolidator")
     uploaded_excel = st.file_uploader("1. Upload Excel Control Sheet First", type=["xlsx", "xls"])
@@ -825,11 +819,14 @@ elif st.session_state.current_page == "batches_and_labels":
             if st.button("Generate Batch Headers PDF", type="primary"):
                 pdf_bytes = create_batch_header_file(job_no, description, int(total_batches), auto_number, int(side_margin))
                 st.download_button(label="⬇️ Download", data=pdf_bytes, file_name="Batch_Headers.pdf", mime="application/pdf")
+                
     elif st.session_state.batches_subtab == "print_labels":
         col_grid1, col_grid2 = st.columns(2)
         with col_grid1:
-            rows = st.number_input("Rows per A4 Page:", min_value=1, value=7)
-            cols = st.number_input("Columns per A4 Page:", min_value=1, value=2)
+            media_w_mm = st.number_input("Sheet Width (mm):", min_value=50.0, value=210.0, key="label_sheet_w")
+            media_h_mm = st.number_input("Sheet Height (mm):", min_value=50.0, value=297.0, key="label_sheet_h")
+            rows = st.number_input("Rows per Page:", min_value=1, value=7)
+            cols = st.number_input("Columns per Page:", min_value=1, value=2)
             label_w_mm = st.number_input("Label Width (mm):", min_value=10.0, value=99.1)
             label_h_mm = st.number_input("Label Height (mm):", min_value=10.0, value=38.1)
         with col_grid2:
@@ -852,7 +849,14 @@ elif st.session_state.current_page == "batches_and_labels":
 
         if st.button("Generate Imposed Labels PDF", type="primary"):
             mm_to_pt = 2.83465
-            pdf_buffer = create_labels_pdf(int(rows), int(cols), label_w_mm * mm_to_pt, label_h_mm * mm_to_pt, gutter_x_mm * mm_to_pt, gutter_y_mm * mm_to_pt, margin_x_mm * mm_to_pt, margin_y_mm * mm_to_pt, master_lines, int(total_labels), include_num)
+            pdf_buffer = create_labels_pdf(
+                media_w_mm * mm_to_pt, media_h_mm * mm_to_pt,
+                int(rows), int(cols),
+                label_w_mm * mm_to_pt, label_h_mm * mm_to_pt,
+                gutter_x_mm * mm_to_pt, gutter_y_mm * mm_to_pt,
+                margin_x_mm * mm_to_pt, margin_y_mm * mm_to_pt,
+                master_lines, int(total_labels), include_num
+            )
             st.success("Label sheet generated successfully!")
             st.download_button(label="⬇ Download Labels", data=pdf_buffer, file_name="Labels_Output.pdf", mime="application/pdf")
 
@@ -869,8 +873,10 @@ elif st.session_state.current_page == "batches_and_labels":
 
         col_grid1, col_grid2 = st.columns(2)
         with col_grid1:
-            rows = st.number_input("Rows per A4 Page:", min_value=1, value=7, key="file_rows")
-            cols = st.number_input("Columns per A4 Page:", min_value=1, value=2, key="file_cols")
+            file_media_w_mm = st.number_input("Sheet Width (mm):", min_value=50.0, value=210.0, key="file_sheet_w")
+            file_media_h_mm = st.number_input("Sheet Height (mm):", min_value=50.0, value=297.0, key="file_sheet_h")
+            rows = st.number_input("Rows per Page:", min_value=1, value=7, key="file_rows")
+            cols = st.number_input("Columns per Page:", min_value=1, value=2, key="file_cols")
             label_w_mm = st.number_input("Label Width (mm):", min_value=10.0, value=99.1, key="file_w")
             label_h_mm = st.number_input("Label Height (mm):", min_value=10.0, value=38.1, key="file_h")
         with col_grid2:
@@ -915,7 +921,14 @@ elif st.session_state.current_page == "batches_and_labels":
                 processed_breaks_configs.append({"count": int(total_clones), "include_numbering": False, "num_mode": "Continue from previous batch", "start_num": 1, "end_num": int(total_clones), "lines": clone_lines, "total_labels_global": int(total_clones)})
 
             mm_to_pt = 2.83465
-            pdf_buffer = create_labels_pdf(int(rows), int(cols), label_w_mm * mm_to_pt, label_h_mm * mm_to_pt, gutter_x_mm * mm_to_pt, gutter_y_mm * mm_to_pt, margin_x_mm * mm_to_pt, margin_y_mm * mm_to_pt, [], int(total_clones), False, processed_breaks_configs)
+            pdf_buffer = create_labels_pdf(
+                file_media_w_mm * mm_to_pt, file_media_h_mm * mm_to_pt,
+                int(rows), int(cols),
+                label_w_mm * mm_to_pt, label_h_mm * mm_to_pt,
+                gutter_x_mm * mm_to_pt, gutter_y_mm * mm_to_pt,
+                margin_x_mm * mm_to_pt, margin_y_mm * mm_to_pt,
+                [], int(total_clones), False, processed_breaks_configs
+            )
             st.success("Data Labels Sheet generated!")
             st.download_button(label="⬇ Download", data=pdf_buffer, file_name="Data_Labels.pdf", mime="application/pdf")
 
