@@ -225,12 +225,20 @@ def create_labels_pdf(media_w_pt, media_h_pt, rows, cols, label_w_pt, label_h_pt
         b_inc_num = batch.get("include_numbering", True)
         b_start = batch.get("start_num", 1)
         b_prefix = batch.get("prefix_num", "")
+        
+        # Calculate total target labels for "X of Y" string
         b_global_total = batch.get("total_labels_global", b_count)
+        total_end_val = (b_start - 1) + b_global_total
         
         for i in range(b_count):
             curr_val = b_start + i
-            seq_str = f"{b_prefix}{curr_val}"
-            all_computed_labels.append({"lines": list(b_lines), "show_num": b_inc_num, "seq_str": seq_str, "current_idx": curr_val, "total_idx": b_global_total})
+            # Format as: [Prefix][Current] of [Total]
+            seq_str = f"{b_prefix}{curr_val} of {total_end_val}"
+            all_computed_labels.append({
+                "lines": list(b_lines), 
+                "show_num": b_inc_num, 
+                "seq_str": seq_str
+            })
             
     total_to_render = len(all_computed_labels)
     label_ptr = 0
@@ -980,10 +988,24 @@ elif st.session_state.current_page == "batches_and_labels":
                             txt = f"{mapping['text']} {val}".strip() if mapping["text"] else str(val)
                         else: txt = mapping["text"]
                         row_lines.append({"text": txt, "font_size": mapping["font_size"], "bold": mapping["bold"]})
-                    processed_breaks_configs.append({"count": 1, "include_numbering": False, "num_mode": "Continue from previous batch", "start_num": 1, "end_num": int(total_clones), "lines": row_lines, "total_labels_global": int(total_clones)})
+                    processed_breaks_configs.append({
+                        "count": 1, 
+                        "include_numbering": include_num_file, 
+                        "start_num": int(start_num_file) + r_idx, 
+                        "prefix_num": prefix_num_file, 
+                        "lines": row_lines, 
+                        "total_labels_global": int(total_clones)
+                    })
             else:
                 clone_lines = [{"text": m["text"], "font_size": m["font_size"], "bold": m["bold"]} for m in line_mappings]
-                processed_breaks_configs.append({"count": int(total_clones), "include_numbering": include_num_file, "num_mode": "Continue from previous batch", "start_num": int(start_num_file), "prefix_num": prefix_num_file, "end_num": int(total_clones), "lines": clone_lines, "total_labels_global": int(total_clones)})
+                processed_breaks_configs.append({
+                    "count": int(total_clones), 
+                    "include_numbering": include_num_file, 
+                    "start_num": int(start_num_file), 
+                    "prefix_num": prefix_num_file, 
+                    "lines": clone_lines, 
+                    "total_labels_global": int(total_clones)
+                })
 
             mm_to_pt = 2.83465
             pdf_buffer = create_labels_pdf(
