@@ -637,7 +637,7 @@ if st.session_state.current_page == "impose":
 
         with col_imp2:
             trim_w = st.number_input("Finished Trim Width (mm):", min_value=5.0, max_value=media_w_mm, value=90.0, step=0.5)
-            trim_h = st.number_input("Finished Trim Height (mm):", min_value=5.0, max_value=750.0, value=55.0, step=0.5)
+            trim_h = st.number_input("Finished Trim Height (mm):", min_value=5.0, max_value=media_h_mm, value=55.0, step=0.5)
             bleed_w = st.number_input("Bleed Envelope Margin (mm):", min_value=0.0, max_value=25.0, value=2.0, step=0.5)
             gut_x = st.number_input("Horizontal Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
             gut_y = st.number_input("Vertical Gutter Gap (mm):", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
