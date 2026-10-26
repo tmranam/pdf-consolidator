@@ -210,12 +210,13 @@ def create_outside_work_label_file(supplier, job_no, client, job_title, qty_this
     packet.seek(0)
     return packet
 
-def create_labels_pdf(media_w_pt, media_h_pt, rows, cols, label_w_pt, label_h_pt, gutter_x_pt, gutter_y_pt, margin_x_pt, margin_y_pt, lines_config, total_labels, include_numbering, breaks_configs=None):
+def create_labels_pdf(media_w_pt, media_h_pt, rows, cols, label_w_pt, label_h_pt, gutter_x_pt, gutter_y_pt, margin_x_pt, margin_y_pt, lines_config, total_labels, include_numbering, start_num=1, prefix_num="", background_pdf_bytes=None, breaks_configs=None):
+    # 1. Generate text overlay PDF
     packet = io.BytesIO()
     can = canvas.Canvas(packet, pagesize=(media_w_pt, media_h_pt))
     
     if not breaks_configs:
-        breaks_configs = [{"count": total_labels, "include_numbering": include_numbering, "num_mode": "Restart from new number", "start_num": 1, "end_num": total_labels, "lines": lines_config, "total_labels_global": total_labels}]
+        breaks_configs = [{"count": total_labels, "include_numbering": include_numbering, "start_num": start_num, "prefix_num": prefix_num, "lines": lines_config, "total_labels_global": total_labels}]
     
     all_computed_labels = []
     for batch in breaks_configs:
@@ -223,10 +224,13 @@ def create_labels_pdf(media_w_pt, media_h_pt, rows, cols, label_w_pt, label_h_pt
         b_lines = batch.get("lines", [])
         b_inc_num = batch.get("include_numbering", True)
         b_start = batch.get("start_num", 1)
+        b_prefix = batch.get("prefix_num", "")
         b_global_total = batch.get("total_labels_global", b_count)
         
         for i in range(b_count):
-            all_computed_labels.append({"lines": list(b_lines), "show_num": b_inc_num, "current_idx": b_start + i, "total_idx": b_global_total})
+            curr_val = b_start + i
+            seq_str = f"{b_prefix}{curr_val}"
+            all_computed_labels.append({"lines": list(b_lines), "show_num": b_inc_num, "seq_str": seq_str, "current_idx": curr_val, "total_idx": b_global_total})
             
     total_to_render = len(all_computed_labels)
     label_ptr = 0
@@ -245,7 +249,7 @@ def create_labels_pdf(media_w_pt, media_h_pt, rows, cols, label_w_pt, label_h_pt
                 active_lines = list(current_label_data["lines"])
                 
                 if current_label_data["show_num"]:
-                    active_lines.append({"text": f"{current_label_data['current_idx']} of {current_label_data['total_idx']}", "font_size": 10, "bold": True})
+                    active_lines.append({"text": current_label_data['seq_str'], "font_size": 10, "bold": True})
                 
                 total_content_lines = len(active_lines)
                 if total_content_lines > 0:
@@ -260,7 +264,29 @@ def create_labels_pdf(media_w_pt, media_h_pt, rows, cols, label_w_pt, label_h_pt
         
     can.save()
     packet.seek(0)
-    return packet
+    text_pdf_reader = PdfReader(packet)
+    
+    # 2. Merge with background PDF if provided, using pypdf
+    writer = PdfWriter()
+    bg_pages = []
+    if background_pdf_bytes:
+        bg_reader = PdfReader(io.BytesIO(background_pdf_bytes))
+        bg_pages = bg_reader.pages
+    
+    for page_idx, text_page in enumerate(text_pdf_reader.pages):
+        if bg_pages:
+            # Loop background pages if text spans multiple pages
+            bg_page = bg_pages[page_idx % len(bg_pages)]
+            # Merge text page on top of background page
+            bg_page.merge_page(text_page)
+            writer.add_page(bg_page)
+        else:
+            writer.add_page(text_page)
+            
+    final_output = io.BytesIO()
+    writer.write(final_output)
+    final_output.seek(0)
+    return final_output
 
 def compute_grid_positions(media_w, media_h, trim_w, trim_h, gutter_x, gutter_y, margin_left, margin_right, margin_top, margin_bottom, cols, rows):
     avail_w = media_w - margin_left - margin_right
@@ -845,7 +871,25 @@ elif st.session_state.current_page == "batches_and_labels":
             master_lines.append({"text": m_text, "font_size": m_sz, "bold": m_bld})
 
         total_labels = st.number_input("Total Labels to Print:", min_value=1, value=14)
-        include_num = st.checkbox("Include Sequential Label Count?", value=True)
+        
+        # Sequential Numbering configuration controls
+        include_num = st.checkbox("Need sequential numbers?", value=True)
+        start_num = 1
+        prefix_num = ""
+        if include_num:
+            seq_col1, seq_col2 = st.columns(2)
+            with seq_col1:
+                start_num = st.number_input("Starting Number:", min_value=0, value=1, key="label_start_num")
+            with seq_col2:
+                prefix_num = st.text_input("Text before starting number (Prefix):", value="", key="label_prefix_num")
+
+        # Background PDF configuration controls
+        add_bg = st.checkbox("Do you want to add a background?", value=False, key="label_add_bg")
+        background_bytes = None
+        if add_bg:
+            bg_file = st.file_uploader("Upload Background PDF File", type=["pdf"], key="label_bg_file")
+            if bg_file is not None:
+                background_bytes = bg_file.read()
 
         if st.button("Generate Imposed Labels PDF", type="primary"):
             mm_to_pt = 2.83465
@@ -855,7 +899,9 @@ elif st.session_state.current_page == "batches_and_labels":
                 label_w_mm * mm_to_pt, label_h_mm * mm_to_pt,
                 gutter_x_mm * mm_to_pt, gutter_y_mm * mm_to_pt,
                 margin_x_mm * mm_to_pt, margin_y_mm * mm_to_pt,
-                master_lines, int(total_labels), include_num
+                master_lines, int(total_labels), include_num,
+                start_num=int(start_num), prefix_num=prefix_num,
+                background_pdf_bytes=background_bytes
             )
             st.success("Label sheet generated successfully!")
             st.download_button(label="⬇ Download Labels", data=pdf_buffer, file_name="Labels_Output.pdf", mime="application/pdf")
@@ -903,6 +949,25 @@ elif st.session_state.current_page == "batches_and_labels":
 
         total_clones = st.number_input("Total Repeated Labels:", min_value=1, value=30) if data_mode != "Use Excel Data Source File" else len(df_labels) if df_labels is not None else 0
 
+        # Sequential Numbering configuration controls for Print from File
+        include_num_file = st.checkbox("Need sequential numbers?", value=False, key="file_include_num")
+        start_num_file = 1
+        prefix_num_file = ""
+        if include_num_file:
+            seq_col1, seq_col2 = st.columns(2)
+            with seq_col1:
+                start_num_file = st.number_input("Starting Number:", min_value=0, value=1, key="file_start_num")
+            with seq_col2:
+                prefix_num_file = st.text_input("Text before starting number (Prefix):", value="", key="file_prefix_num")
+
+        # Background PDF configuration controls for Print from File
+        add_bg_file = st.checkbox("Do you want to add a background?", value=False, key="file_add_bg")
+        background_bytes_file = None
+        if add_bg_file:
+            bg_file_obj = st.file_uploader("Upload Background PDF File", type=["pdf"], key="file_bg_file")
+            if bg_file_obj is not None:
+                background_bytes_file = bg_file_obj.read()
+
         if st.button("Generate Imposed Data Labels PDF", type="primary"):
             processed_breaks_configs = []
             if data_mode == "Use Excel Data Source File" and df_labels is not None:
@@ -918,7 +983,7 @@ elif st.session_state.current_page == "batches_and_labels":
                     processed_breaks_configs.append({"count": 1, "include_numbering": False, "num_mode": "Continue from previous batch", "start_num": 1, "end_num": int(total_clones), "lines": row_lines, "total_labels_global": int(total_clones)})
             else:
                 clone_lines = [{"text": m["text"], "font_size": m["font_size"], "bold": m["bold"]} for m in line_mappings]
-                processed_breaks_configs.append({"count": int(total_clones), "include_numbering": False, "num_mode": "Continue from previous batch", "start_num": 1, "end_num": int(total_clones), "lines": clone_lines, "total_labels_global": int(total_clones)})
+                processed_breaks_configs.append({"count": int(total_clones), "include_numbering": include_num_file, "num_mode": "Continue from previous batch", "start_num": int(start_num_file), "prefix_num": prefix_num_file, "end_num": int(total_clones), "lines": clone_lines, "total_labels_global": int(total_clones)})
 
             mm_to_pt = 2.83465
             pdf_buffer = create_labels_pdf(
@@ -927,7 +992,9 @@ elif st.session_state.current_page == "batches_and_labels":
                 label_w_mm * mm_to_pt, label_h_mm * mm_to_pt,
                 gutter_x_mm * mm_to_pt, gutter_y_mm * mm_to_pt,
                 margin_x_mm * mm_to_pt, margin_y_mm * mm_to_pt,
-                [], int(total_clones), False, processed_breaks_configs
+                [], int(total_clones), include_num_file,
+                start_num=int(start_num_file), prefix_num=prefix_num_file,
+                background_pdf_bytes=background_bytes_file, breaks_configs=processed_breaks_configs
             )
             st.success("Data Labels Sheet generated!")
             st.download_button(label="⬇ Download", data=pdf_buffer, file_name="Data_Labels.pdf", mime="application/pdf")
